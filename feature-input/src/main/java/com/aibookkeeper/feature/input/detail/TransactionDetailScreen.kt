@@ -173,11 +173,11 @@ private fun TransactionDetailContent(
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var isEditing by remember { mutableStateOf(false) }
-    var editAmount by remember(transaction) { mutableStateOf("%.2f".format(transaction.amount)) }
-    var editNote by remember(transaction) { mutableStateOf(transaction.note ?: "") }
-    var editCategoryId by remember(transaction) { mutableStateOf(transaction.categoryId) }
-    var editCategoryName by remember(transaction) { mutableStateOf(transaction.categoryName ?: "") }
-    var editDate by remember(transaction) { mutableStateOf(transaction.date) }
+    var editAmount by remember(transaction.id) { mutableStateOf("%.2f".format(transaction.amount)) }
+    var editNote by remember(transaction.id) { mutableStateOf(transaction.note ?: "") }
+    var editCategoryId by remember(transaction.id) { mutableStateOf(transaction.categoryId) }
+    var editCategoryName by remember(transaction.id) { mutableStateOf(transaction.categoryName ?: "") }
+    var editDate by remember(transaction.id) { mutableStateOf(transaction.date) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDeleteDialog) {
@@ -304,15 +304,31 @@ private fun TransactionDetailContent(
                     // Date picker
                     Text("日期", style = MaterialTheme.typography.labelLarge)
                     Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = editDate.toLocalDate().toString(),
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showDatePicker = true },
-                        enabled = false
-                    )
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showDatePicker = true }
+                    ) {
+                        OutlinedTextField(
+                            value = editDate.toLocalDate().toString(),
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "选择日期",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        )
+                        // Transparent overlay to capture clicks (readOnly TextField doesn't propagate clicks)
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { showDatePicker = true }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Category selection
