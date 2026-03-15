@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.aibookkeeper.feature.capture.R
 import dagger.hilt.android.AndroidEntryPoint
@@ -105,52 +104,23 @@ class PaymentNotificationService : Service() {
         return START_STICKY
     }
 
-    // ── Build the persistent notification with RemoteViews ────────────────
+    // ── Build the persistent notification ────────────────
 
     private fun buildPersistentNotification(): Notification {
-        val expandedView = RemoteViews(packageName, R.layout.notification_quick_actions)
-
-        // Wire up the 3 main action buttons
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_text_input,
-            buildQuickInputPending(NotificationConstants.ACTION_QUICK_TEXT)
-        )
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_voice_input,
-            buildQuickInputPending(NotificationConstants.ACTION_QUICK_VOICE)
-        )
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_camera_input,
-            buildQuickInputPending(NotificationConstants.ACTION_QUICK_CAMERA)
-        )
-
-        // Wire up category quick buttons
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_category_food,
-            buildCategoryPending("餐饮", "🍚")
-        )
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_category_transport,
-            buildCategoryPending("交通", "🚗")
-        )
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_category_coffee,
-            buildCategoryPending("咖啡", "☕")
-        )
-        expandedView.setOnClickPendingIntent(
-            R.id.btn_category_shopping,
-            buildCategoryPending("购物", "🛒")
+        // Single tap opens the app's home screen (user can tap FAB there)
+        val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val openAppPending = PendingIntent.getActivity(
+            this, 0, openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
             .setSmallIcon(android.R.drawable.ic_input_add)
             .setContentTitle("AI 智能记账")
-            .setContentText("点击快速记账")
+            .setContentText("点击打开记账")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCustomBigContentView(expandedView)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-            .setContentIntent(buildQuickInputPending(NotificationConstants.ACTION_QUICK_TEXT))
+            .setContentIntent(openAppPending)
             .build()
     }
 
