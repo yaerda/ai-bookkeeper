@@ -153,7 +153,10 @@ fun HomeScreen(
                     items = uiState.recentTransactions.take(10),
                     key = { it.id }
                 ) { transaction ->
-                    RecentTransactionItem(transaction = transaction)
+                    RecentTransactionItem(
+                        transaction = transaction,
+                        onClick = { navController.navigate("transaction/${transaction.id}") }
+                    )
                 }
             }
 
@@ -317,12 +320,13 @@ private fun SummarySection(uiState: HomeUiState) {
 }
 
 @Composable
-private fun RecentTransactionItem(transaction: Transaction) {
+private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit = {}) {
     val emoji = CategoryIconMapper.getEmoji(transaction.categoryIcon)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
