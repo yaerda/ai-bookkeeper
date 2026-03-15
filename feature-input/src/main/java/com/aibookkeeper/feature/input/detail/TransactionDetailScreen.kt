@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +30,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -158,7 +162,7 @@ fun TransactionDetailScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun TransactionDetailContent(
     transaction: Transaction,
@@ -174,6 +178,7 @@ private fun TransactionDetailContent(
     var editCategoryId by remember(transaction) { mutableStateOf(transaction.categoryId) }
     var editCategoryName by remember(transaction) { mutableStateOf(transaction.categoryName ?: "") }
     var editDate by remember(transaction) { mutableStateOf(transaction.date) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -272,7 +277,7 @@ private fun TransactionDetailContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (isEditing) {
-                    // Editable amount
+                    // Amount (numeric keyboard)
                     OutlinedTextField(
                         value = editAmount,
                         onValueChange = { v ->
@@ -281,7 +286,32 @@ private fun TransactionDetailContent(
                         label = { Text("金额") },
                         prefix = { Text("¥") },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Note
+                    OutlinedTextField(
+                        value = editNote,
+                        onValueChange = { editNote = it },
+                        label = { Text("备注") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Date picker
+                    Text("日期", style = MaterialTheme.typography.labelLarge)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = editDate.toLocalDate().toString(),
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDatePicker = true },
+                        enabled = false
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -301,23 +331,6 @@ private fun TransactionDetailContent(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Note
-                    OutlinedTextField(
-                        value = editNote,
-                        onValueChange = { editNote = it },
-                        label = { Text("备注") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Date display (editable via DatePicker would be ideal, for now show text)
-                    DetailRow(
-                        label = "日期",
-                        value = editDate.toLocalDate().toString()
-                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
@@ -342,6 +355,32 @@ private fun TransactionDetailContent(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) { Text("保存") }
+                    }
+
+                    // DatePicker dialog
+                    if (showDatePicker) {
+                        val datePickerState = rememberDatePickerState(
+                            initialSelectedDateMillis = editDate.toLocalDate()
+                                .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        )
+                        DatePickerDialog(
+                            onDismissRequest = { showDatePicker = false },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    datePickerState.selectedDateMillis?.let { millis ->
+                                        val ld = java.time.Instant.ofEpochMilli(millis)
+                                            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                                        editDate = ld.atStartOfDay()
+                                    }
+                                    showDatePicker = false
+                                }) { Text("确定") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+                            }
+                        ) {
+                            DatePicker(state = datePickerState)
+                        }
                     }
                 } else {
                     // Read-only view
