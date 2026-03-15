@@ -84,10 +84,12 @@ fun AppNavHost() {
             val topLevelRoutes = setOf(
                 InputRoutes.HOME,
                 "stats",
+                InputRoutes.TEXT_INPUT,
+                InputRoutes.TEXT_INPUT_BASE,
                 InputRoutes.BILLS,
                 "settings"
             )
-            val showBottomBar = topLevelRoutes.contains(currentRoute)
+            val showBottomBar = topLevelRoutes.any { currentRoute?.startsWith(it.split("?")[0]) == true }
 
             if (showBottomBar) {
                 NavigationBar {

@@ -52,6 +52,36 @@ class DateExtensionsTest {
             val date = LocalDate.of(2026, 1, 1)
             assertEquals("1月1日 周四", date.toFriendlyDateString())
         }
+
+        @Test
+        fun should_showCorrectWeekday_when_tuesday() {
+            val date = LocalDate.of(2026, 3, 17)
+            assertEquals("3月17日 周二", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_showCorrectWeekday_when_wednesday() {
+            val date = LocalDate.of(2026, 3, 18)
+            assertEquals("3月18日 周三", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_showCorrectWeekday_when_friday() {
+            val date = LocalDate.of(2026, 3, 13)
+            assertEquals("3月13日 周五", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_formatLeapYearDate_when_feb29() {
+            val date = LocalDate.of(2028, 2, 29)
+            assertEquals("2月29日 周二", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_formatDoubleDigitMonthAndDay_when_november25() {
+            val date = LocalDate.of(2026, 11, 25)
+            assertEquals("11月25日 周三", date.toFriendlyDateString())
+        }
     }
 
     // ── Friendly date-time formatting ────────────────────────────────────
@@ -76,6 +106,18 @@ class DateExtensionsTest {
             val dt = LocalDateTime.of(2026, 3, 14, 0, 0)
             assertEquals("3月14日 周六 00:00", dt.toFriendlyDateTimeString())
         }
+
+        @Test
+        fun should_showLastMinute_when_endOfDay() {
+            val dt = LocalDateTime.of(2026, 3, 14, 23, 59)
+            assertEquals("3月14日 周六 23:59", dt.toFriendlyDateTimeString())
+        }
+
+        @Test
+        fun should_formatLeapYearDateTime_when_feb29() {
+            val dt = LocalDateTime.of(2028, 2, 29, 12, 0)
+            assertEquals("2月29日 周二 12:00", dt.toFriendlyDateTimeString())
+        }
     }
 
     // ── Friendly full date-time formatting ───────────────────────────────
@@ -93,6 +135,12 @@ class DateExtensionsTest {
         fun should_padTimeComponents_when_singleDigit() {
             val dt = LocalDateTime.of(2026, 1, 2, 3, 4, 5)
             assertEquals("2026年1月2日 03:04:05", dt.toFriendlyFullDateTimeString())
+        }
+
+        @Test
+        fun should_formatLeapYearFullDateTime_when_feb29() {
+            val dt = LocalDateTime.of(2028, 2, 29, 18, 30, 0)
+            assertEquals("2028年2月29日 18:30:00", dt.toFriendlyFullDateTimeString())
         }
     }
 

@@ -158,6 +158,23 @@ class BillsViewModelTest {
         }
 
         @Test
+        fun should_useFriendlyDateString_when_groupDateIsOlderThanYesterday() = runTest {
+            val twoDaysAgo = LocalDate.now().minusDays(2)
+            val tx = createTransaction(date = twoDaysAgo.atTime(12, 0))
+            val vm = createViewModel(transactions = listOf(tx))
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                val label = loaded.dayGroups.first().label
+                // Should be friendly Chinese format, e.g. "3月12日 周四"
+                assertTrue(label.matches(Regex("\\d{1,2}月\\d{1,2}日 周[一二三四五六日]")),
+                    "Expected friendly date format but got: $label")
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
         fun should_calculateDayExpense_when_groupHasExpenses() = runTest {
             val today = LocalDate.now()
             val tx1 = createTransaction(id = 1, amount = 35.0, date = today.atTime(12, 0))
