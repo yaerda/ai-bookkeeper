@@ -202,10 +202,11 @@ private fun SummaryCards(
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
                 )
                 Text(
-                    text = "¥${"%.2f".format(expense)}",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = formatCompactAmount(expense),
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onErrorContainer
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    maxLines = 1
                 )
             }
         }
@@ -225,10 +226,11 @@ private fun SummaryCards(
                     color = Color(0xFF2E7D32).copy(alpha = 0.7f)
                 )
                 Text(
-                    text = "¥${"%.2f".format(income)}",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = formatCompactAmount(income),
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2E7D32)
+                    color = Color(0xFF2E7D32),
+                    maxLines = 1
                 )
             }
         }
@@ -248,7 +250,7 @@ private fun SummaryCards(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
                 Text(
-                    text = "${if (balance >= 0) "" else "-"}¥${"%.2f".format(kotlin.math.abs(balance))}",
+                    text = "${if (balance < 0) "-" else ""}${formatCompactAmount(kotlin.math.abs(balance))}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (balance >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
@@ -256,6 +258,15 @@ private fun SummaryCards(
                 )
             }
         }
+    }
+}
+
+private fun formatCompactAmount(amount: Double): String {
+    return when {
+        amount >= 100_000_000 -> "${"%.1f".format(amount / 100_000_000)}亿"
+        amount >= 10_000 -> "${"%.1f".format(amount / 10_000)}万"
+        amount >= 1_000 -> "${"%.1f".format(amount / 1_000)}k"
+        else -> "¥${"%.0f".format(amount)}"
     }
 }
 
