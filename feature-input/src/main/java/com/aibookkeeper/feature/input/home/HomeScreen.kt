@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -119,6 +120,13 @@ fun HomeScreen(
             // Summary cards
             item {
                 SummarySection(uiState = uiState)
+            }
+
+            // AI quick input bar
+            item {
+                AiQuickInputBar(
+                    onClick = { navController.navigate(InputRoutes.TEXT_INPUT) }
+                )
             }
 
             // Quick category grid
@@ -342,6 +350,44 @@ private fun SummarySection(uiState: HomeUiState) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AiQuickInputBar(
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("✨", fontSize = 20.sp)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "输入一句话，AI帮你记账...",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.Send,
+                contentDescription = "AI记账",
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

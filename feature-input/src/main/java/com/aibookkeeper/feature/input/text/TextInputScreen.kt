@@ -156,6 +156,7 @@ private fun AiInputSection(
 ) {
     var inputText by remember { mutableStateOf("") }
     var showManualForm by remember { mutableStateOf(false) }
+    var gridSelectedCategory by remember { mutableStateOf<Category?>(null) }
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -258,6 +259,32 @@ private fun AiInputSection(
 
     Spacer(modifier = Modifier.height(24.dp))
 
+    // Quick category grid
+    Text(
+        text = "🏷️ 快速分类",
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(bottom = 8.dp)
+    )
+
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        categories.take(8).forEach { cat ->
+            CategoryGridItem(
+                category = cat,
+                onClick = {
+                    gridSelectedCategory = cat
+                    showManualForm = true
+                }
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+
     // Manual form toggle
     TextButton(
         onClick = { showManualForm = !showManualForm },
@@ -271,7 +298,8 @@ private fun AiInputSection(
     AnimatedVisibility(visible = showManualForm) {
         ManualInputForm(
             categories = categories,
-            onSave = onManualSave
+            onSave = onManualSave,
+            initialCategory = gridSelectedCategory
         )
     }
 }
@@ -280,10 +308,11 @@ private fun AiInputSection(
 @Composable
 private fun ManualInputForm(
     categories: List<Category>,
-    onSave: (Double, Long?, String, String?, TransactionType) -> Unit
+    onSave: (Double, Long?, String, String?, TransactionType) -> Unit,
+    initialCategory: Category? = null
 ) {
     var amountText by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var note by remember { mutableStateOf("") }
     var isExpense by remember { mutableStateOf(true) }
 
@@ -604,6 +633,48 @@ private fun ErrorSection(
         ) {
             Text("重试")
         }
+    }
+}
+
+@Composable
+private fun CategoryGridItem(
+    category: Category,
+    onClick: () -> Unit
+) {
+    val emoji = CategoryIconMapper.getEmoji(category.icon)
+    val bgColor = parseCategoryColor(category.color)
+
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(bgColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = emoji, fontSize = 24.sp)
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = category.name,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+private fun parseCategoryColor(colorStr: String?): Color {
+    if (colorStr.isNullOrBlank()) return Color(0xFF607D8B)
+    return try {
+        Color(android.graphics.Color.parseColor(colorStr))
+    } catch (_: Exception) {
+        Color(0xFF607D8B)
     }
 }
 
