@@ -63,11 +63,11 @@ class PaymentNotificationService : Service() {
             )
 
             val notification = NotificationCompat.Builder(context, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
-                .setSmallIcon(android.R.drawable.ic_input_add)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentText(message)
                 .setAutoCancel(true)
                 .setTimeoutAfter(3_000L)
-                .addAction(android.R.drawable.ic_menu_revert, "撤销", undoPending)
+                .addAction(R.drawable.ic_notification, "撤销", undoPending)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .build()
 
@@ -115,7 +115,7 @@ class PaymentNotificationService : Service() {
         )
 
         return NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
-            .setSmallIcon(android.R.drawable.ic_input_add)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("AI 智能记账")
             .setContentText("点击打开记账")
             .setOngoing(true)
