@@ -236,7 +236,11 @@ fun HomeScreen(
                             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
                         }
-                        voiceLauncher.launch(intent)
+                        if (intent.resolveActivity(navController.context.packageManager) != null) {
+                            voiceLauncher.launch(intent)
+                        } else {
+                            Toast.makeText(navController.context, "🎙 未安装语音识别服务，请安装 Google 语音", Toast.LENGTH_LONG).show()
+                        }
                     }) {
                         Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
                     }
