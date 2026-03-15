@@ -1,6 +1,11 @@
 package com.aibookkeeper.feature.input.home
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -170,6 +175,20 @@ fun HomeScreen(
     // AI 记账 BottomSheet
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+        val voiceLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val text = result.data
+                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                    ?.firstOrNull()
+                if (!text.isNullOrBlank()) {
+                    aiInput = text
+                }
+            }
+        }
+
         ModalBottomSheet(
             onDismissRequest = { showAiSheet = false },
             sheetState = sheetState
@@ -203,7 +222,14 @@ fun HomeScreen(
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IconButton(onClick = { /* TODO: voice input */ }) {
+                    IconButton(onClick = {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...")
+                        }
+                        voiceLauncher.launch(intent)
+                    }) {
                         Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = { /* TODO: camera */ }) {
