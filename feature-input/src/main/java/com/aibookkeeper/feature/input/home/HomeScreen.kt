@@ -361,7 +361,7 @@ private fun RecentTransactionItem(transaction: Transaction) {
                     )
                 }
                 Text(
-                    text = transaction.date.format(DateTimeFormatter.ofPattern("HH:mm")),
+                    text = transaction.date.format(DateTimeFormatter.ofPattern("M/d")),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
