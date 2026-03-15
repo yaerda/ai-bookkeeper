@@ -1,5 +1,7 @@
 package com.aibookkeeper.core.data.di
 
+import com.aibookkeeper.core.data.ai.AzureOpenAiConfig
+import com.aibookkeeper.core.data.network.AzureOpenAiService
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -43,16 +45,34 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideAzureOpenAiConfig(
+        @Named("azureOpenAiApiKey") apiKey: String,
+        @Named("azureOpenAiEndpoint") endpoint: String,
+        @Named("azureOpenAiDeployment") deployment: String
+    ): AzureOpenAiConfig = AzureOpenAiConfig(apiKey, endpoint, deployment)
+
+    @Provides
+    @Singleton
     @Named("azureRetrofit")
     fun provideAzureRetrofit(
+        config: AzureOpenAiConfig,
         okHttpClient: OkHttpClient,
         json: Json
     ): Retrofit {
-        // Base URL will be configured from BuildConfig at runtime
+        val baseUrl = config.endpoint.let { ep ->
+            if (ep.isBlank()) "https://placeholder.openai.azure.com/"
+            else if (ep.endsWith("/")) ep else "$ep/"
+        }
         return Retrofit.Builder()
-            .baseUrl("https://placeholder.openai.azure.com/")
+            .baseUrl(baseUrl)
             .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
     }
+
+    @Provides
+    @Singleton
+    fun provideAzureOpenAiService(
+        @Named("azureRetrofit") retrofit: Retrofit
+    ): AzureOpenAiService = retrofit.create(AzureOpenAiService::class.java)
 }
