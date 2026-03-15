@@ -2,6 +2,7 @@ package com.aibookkeeper.core.data.di
 
 import com.aibookkeeper.core.data.ai.AzureOpenAiConfig
 import com.aibookkeeper.core.data.network.AzureOpenAiService
+import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -43,13 +44,28 @@ object NetworkModule {
             .build()
     }
 
+    /**
+     * Provides Azure config preferring EncryptedSharedPreferences,
+     * falling back to BuildConfig values passed via @Named strings.
+     */
     @Provides
     @Singleton
     fun provideAzureOpenAiConfig(
-        @Named("azureOpenAiApiKey") apiKey: String,
-        @Named("azureOpenAiEndpoint") endpoint: String,
-        @Named("azureOpenAiDeployment") deployment: String
-    ): AzureOpenAiConfig = AzureOpenAiConfig(apiKey, endpoint, deployment)
+        secureStore: SecureConfigStore,
+        @Named("azureOpenAiApiKey") buildConfigApiKey: String,
+        @Named("azureOpenAiEndpoint") buildConfigEndpoint: String,
+        @Named("azureOpenAiDeployment") buildConfigDeployment: String
+    ): AzureOpenAiConfig {
+        // Migrate BuildConfig values to encrypted storage on first run
+        secureStore.migrateFromBuildConfig(buildConfigApiKey, buildConfigEndpoint, buildConfigDeployment)
+
+        // Always read from encrypted storage
+        return AzureOpenAiConfig(
+            apiKey = secureStore.getApiKey().ifBlank { buildConfigApiKey },
+            endpoint = secureStore.getEndpoint().ifBlank { buildConfigEndpoint },
+            deployment = secureStore.getDeployment().ifBlank { buildConfigDeployment }
+        )
+    }
 
     @Provides
     @Singleton

@@ -4,6 +4,8 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.AiExtractionRepositoryImpl
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.CategoryRepositoryImpl
+import com.aibookkeeper.core.data.repository.RawEventRepository
+import com.aibookkeeper.core.data.repository.RawEventRepositoryImpl
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionRepositoryImpl
 import dagger.Binds
@@ -33,4 +35,10 @@ abstract class RepositoryModule {
     abstract fun bindAiExtractionRepository(
         impl: AiExtractionRepositoryImpl
     ): AiExtractionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindRawEventRepository(
+        impl: RawEventRepositoryImpl
+    ): RawEventRepository
 }

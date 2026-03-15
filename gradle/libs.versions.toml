@@ -29,6 +29,8 @@ coil = "3.0.4"
 # ML Kit
 mlkit-text = "16.0.1"
 
+security-crypto = "1.1.0-alpha06"
+
 # Chart
 vico = "2.0.0-beta.2"
 
@@ -95,6 +97,9 @@ mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-reco
 
 # WorkManager
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+
+# Security
+security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
 
 # Desugar (java.time backport)
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }

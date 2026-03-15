@@ -8,6 +8,7 @@ import com.aibookkeeper.core.data.local.PrepopulateCallback
 import com.aibookkeeper.core.data.local.dao.BudgetDao
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.dao.MonthlyStatsDao
+import com.aibookkeeper.core.data.local.dao.RawEventDao
 import com.aibookkeeper.core.data.local.dao.TransactionDao
 import com.aibookkeeper.core.data.local.migration.Migrations
 import dagger.Module
@@ -45,4 +46,7 @@ object DatabaseModule {
 
     @Provides
     fun provideMonthlyStatsDao(db: AppDatabase): MonthlyStatsDao = db.monthlyStatsDao()
+
+    @Provides
+    fun provideRawEventDao(db: AppDatabase): RawEventDao = db.rawEventDao()
 }
