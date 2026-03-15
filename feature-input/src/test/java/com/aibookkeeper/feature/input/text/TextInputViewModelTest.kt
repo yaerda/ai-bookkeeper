@@ -399,4 +399,153 @@ class TextInputViewModelTest {
             assertEquals(TextInputUiState.Idle, vm.uiState.value)
         }
     }
+
+    // ── Boundary & integration ───────────────────────────────────────────
+
+    @Nested
+    inner class BoundaryAndIntegration {
+
+        @Test
+        fun should_detectIncomeType_when_extractionTypeIsIncome() = runTest {
+            val extraction = createExtractionResult(
+                amount = 8000.0,
+                type = "INCOME",
+                category = "工资",
+                confidence = 0.95f
+            )
+            coEvery { aiExtractionRepository.extract("工资8000") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("工资8000")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.type == TransactionType.INCOME && it.amount == 8000.0
+                })
+            }
+        }
+
+        @Test
+        fun should_fallbackToNow_when_extractionDateInvalid() = runTest {
+            val extraction = createExtractionResult(date = "invalid-date")
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.date.toLocalDate() == LocalDate.now()
+                })
+            }
+        }
+
+        @Test
+        fun should_setAmountToZero_when_extractionAmountNull() = runTest {
+            val extraction = createExtractionResult(amount = null)
+            coEvery { aiExtractionRepository.extract("不知道多少钱") } returns Result.success(extraction)
+
+            val vm = createViewModel()
+            vm.submitText("不知道多少钱")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertTrue(state is TextInputUiState.Preview)
+            assertEquals(0.0, (state as TextInputUiState.Preview).amount)
+        }
+
+        @Test
+        fun should_setStatusConfirmed_when_confidenceExactly0_7() = runTest {
+            val extraction = createExtractionResult(confidence = 0.7f)
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.status == com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
+                })
+            }
+        }
+
+        @Test
+        fun should_loadCategories_when_repositoryEmitsCategories() = runTest {
+            val categories = listOf(
+                Category(id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE),
+                Category(id = 2, name = "交通", icon = "ic_transport", color = "#2196F3", type = TransactionType.EXPENSE)
+            )
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+
+            val vm = createViewModel()
+
+            vm.categories.test {
+                val loaded = awaitItem()
+                assertEquals(2, loaded.size)
+                assertEquals("餐饮", loaded[0].name)
+                assertEquals("交通", loaded[1].name)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_showExtractingThenPreview_when_fullFlowCompleted() = runTest {
+            val extraction = createExtractionResult()
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+
+            val vm = createViewModel()
+
+            vm.uiState.test {
+                assertEquals(TextInputUiState.Idle, awaitItem())
+
+                vm.submitText("午饭35")
+                assertEquals(TextInputUiState.Extracting, awaitItem())
+
+                val preview = awaitItem()
+                assertTrue(preview is TextInputUiState.Preview)
+                assertEquals(35.0, (preview as TextInputUiState.Preview).amount)
+
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_setSourceTextAi_when_confirmSaveCalled() = runTest {
+            val extraction = createExtractionResult()
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.source == TransactionSource.TEXT_AI
+                })
+            }
+        }
+    }
 }

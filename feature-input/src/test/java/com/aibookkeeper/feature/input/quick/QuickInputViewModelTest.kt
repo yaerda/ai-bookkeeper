@@ -282,4 +282,107 @@ class QuickInputViewModelTest {
             assertNull(state.preselectedCategory)
         }
     }
+
+    // ── Boundary & edge cases ────────────────────────────────────────────
+
+    @Nested
+    inner class BoundaryAndEdgeCases {
+
+        @Test
+        fun should_useCategoryId_when_categoryFoundInDb() = runTest {
+            val category = com.aibookkeeper.core.data.model.Category(
+                id = 3, name = "餐饮", icon = "ic_food", color = "#FF5722",
+                type = TransactionType.EXPENSE
+            )
+            coEvery { categoryRepository.findByNameAndType("餐饮", TransactionType.EXPENSE) } returns category
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitCategoryAmount(35.0, "餐饮")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match { it.categoryId == 3L })
+            }
+        }
+
+        @Test
+        fun should_setStatusConfirmed_when_confidenceExactly0_7() = runTest {
+            val extraction = createExtractionResult(confidence = 0.7f)
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.status == com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
+                })
+            }
+        }
+
+        @Test
+        fun should_fallbackToNow_when_invalidDateInExtraction() = runTest {
+            val extraction = ExtractionResult(
+                amount = 35.0,
+                type = "EXPENSE",
+                category = "餐饮",
+                date = "not-a-date",
+                note = "午饭",
+                confidence = 0.92f,
+                source = ExtractionSource.LOCAL_RULE
+            )
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.date.toLocalDate() == LocalDate.now()
+                })
+            }
+        }
+
+        @Test
+        fun should_showDefaultError_when_nullMessageOnSaveFail() = runTest {
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns
+                    Result.failure(RuntimeException())
+
+            val vm = createViewModel()
+            vm.submitCategoryAmount(35.0, "餐饮")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertTrue(state is QuickInputUiState.Error)
+            assertEquals("保存失败", (state as QuickInputUiState.Error).message)
+        }
+
+        @Test
+        fun should_showDefaultError_when_extractionFailsWithNullMessage() = runTest {
+            coEvery { aiExtractionRepository.extract(any()) } returns
+                    Result.failure(RuntimeException())
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertTrue(state is QuickInputUiState.Error)
+            assertEquals("AI 提取失败，请重试", (state as QuickInputUiState.Error).message)
+        }
+    }
 }

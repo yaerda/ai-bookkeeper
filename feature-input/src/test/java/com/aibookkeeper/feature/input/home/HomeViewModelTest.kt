@@ -246,5 +246,53 @@ class HomeViewModelTest {
                 cancelAndIgnoreRemainingEvents()
             }
         }
+
+        @Test
+        fun should_calculateTodayIncome_when_incomeTransactionsExist() = runTest {
+            val incomeTx = createTransaction(id = 1, amount = 5000.0, type = TransactionType.INCOME, date = now)
+            val vm = createViewModel(transactions = listOf(incomeTx))
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(5000.0, loaded.todayIncome)
+                assertEquals(0.0, loaded.todayExpense)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_returnExactly20_when_exactly20TransactionsExist() = runTest {
+            val transactions = (1..20L).map { createTransaction(id = it) }
+            val vm = createViewModel(transactions = transactions)
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(20, loaded.recentTransactions.size)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_countOnlyTodayTransactions_when_mixedDatesExist() = runTest {
+            val todayTx = createTransaction(id = 1, amount = 30.0, date = now)
+            val yesterdayTx = createTransaction(id = 2, amount = 100.0, date = now.minusDays(1))
+            val vm = createViewModel(transactions = listOf(todayTx, yesterdayTx))
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(30.0, loaded.todayExpense)
+                assertEquals(2, loaded.recentTransactions.size)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_setCurrentMonthInInitialState_when_created() {
+            val vm = createViewModel()
+            assertEquals(currentMonth, vm.uiState.value.currentMonth)
+        }
     }
 }
