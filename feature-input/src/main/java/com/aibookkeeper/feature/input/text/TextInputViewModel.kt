@@ -31,6 +31,7 @@ sealed interface TextInputUiState {
         val category: String,
         val note: String?,
         val merchantName: String?,
+        val date: String,
         val confidence: Float,
         val originalInput: String
     ) : TextInputUiState
@@ -73,6 +74,7 @@ class TextInputViewModel @Inject constructor(
                         category = result.category,
                         note = result.note,
                         merchantName = result.merchantName,
+                        date = result.date,
                         confidence = result.confidence,
                         originalInput = input
                     )

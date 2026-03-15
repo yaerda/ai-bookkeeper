@@ -157,6 +157,7 @@ fun QuickInputSheetContent(
                             amount = uiState.amount,
                             category = uiState.category,
                             note = uiState.note,
+                            date = uiState.date,
                             confidence = uiState.confidence,
                             onConfirm = onConfirm,
                             onEdit = { /* will be handled after save via full editor */ },
@@ -355,6 +356,7 @@ private fun PreviewContent(
     amount: Double,
     category: String,
     note: String?,
+    date: String,
     confidence: Float,
     onConfirm: () -> Unit,
     onEdit: () -> Unit,
@@ -382,6 +384,16 @@ private fun PreviewContent(
     Text(
         text = category,
         style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier.fillMaxWidth(),
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    // Date display
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "📅 $date",
+        style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.fillMaxWidth(),
         textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -549,6 +561,7 @@ private fun QuickInputPreviewState() {
                 amount = 35.0,
                 category = "餐饮",
                 note = "午饭",
+                date = "2026-03-15",
                 confidence = 0.92f,
                 originalInput = "午饭35"
             ),

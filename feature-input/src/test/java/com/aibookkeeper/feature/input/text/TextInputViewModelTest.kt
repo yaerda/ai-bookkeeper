@@ -498,7 +498,9 @@ class TextInputViewModelTest {
             val vm = createViewModel()
 
             vm.categories.test {
-                val loaded = awaitItem()
+                // stateIn initial value may be emptyList(); skip to the loaded value
+                val first = awaitItem()
+                val loaded = if (first.isEmpty()) awaitItem() else first
                 assertEquals(2, loaded.size)
                 assertEquals("餐饮", loaded[0].name)
                 assertEquals("交通", loaded[1].name)
@@ -545,6 +547,126 @@ class TextInputViewModelTest {
                 transactionRepository.create(match {
                     it.source == TransactionSource.TEXT_AI
                 })
+            }
+        }
+    }
+
+    // ── Category pre-selection (supports initialCategoryId in UI) ────────
+
+    @Nested
+    inner class CategoryPreSelection {
+
+        @Test
+        fun should_exposeCategoryById_when_categoriesLoaded() = runTest {
+            val categories = listOf(
+                Category(id = 5, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE),
+                Category(id = 10, name = "交通", icon = "ic_transport", color = "#2196F3", type = TransactionType.EXPENSE)
+            )
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+
+            val vm = createViewModel()
+
+            vm.categories.test {
+                val first = awaitItem()
+                val loaded = if (first.isEmpty()) awaitItem() else first
+                val found = loaded.find { it.id == 5L }
+                assertNotNull(found)
+                assertEquals("餐饮", found!!.name)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_returnNull_when_categoryIdNotInList() = runTest {
+            val categories = listOf(
+                Category(id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE)
+            )
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+
+            val vm = createViewModel()
+
+            vm.categories.test {
+                val first = awaitItem()
+                val loaded = if (first.isEmpty()) awaitItem() else first
+                val found = loaded.find { it.id == 999L }
+                assertNull(found)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_saveWithPreselectedCategory_when_manualSaveWithCategoryId() = runTest {
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.saveManual(
+                amount = 25.0,
+                categoryId = 5L,
+                categoryName = "餐饮",
+                note = "早餐",
+                type = TransactionType.EXPENSE
+            )
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.categoryId == 5L &&
+                    it.categoryName == "餐饮" &&
+                    it.amount == 25.0 &&
+                    it.note == "早餐"
+                })
+            }
+        }
+
+        @Test
+        fun should_saveWithNullCategoryId_when_noCategorySelected() = runTest {
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.saveManual(
+                amount = 100.0,
+                categoryId = null,
+                categoryName = "其他",
+                note = null,
+                type = TransactionType.EXPENSE
+            )
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.categoryId == null &&
+                    it.categoryName == "其他"
+                })
+            }
+        }
+
+        @Test
+        fun should_preserveAllCategoryFields_when_categoriesLoaded() = runTest {
+            val categories = listOf(
+                Category(
+                    id = 7,
+                    name = "购物",
+                    icon = "ic_shopping",
+                    color = "#9C27B0",
+                    type = TransactionType.EXPENSE,
+                    sortOrder = 3
+                )
+            )
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+
+            val vm = createViewModel()
+
+            vm.categories.test {
+                val first = awaitItem()
+                val loaded = if (first.isEmpty()) awaitItem() else first
+                assertEquals(1, loaded.size)
+                val cat = loaded[0]
+                assertEquals(7L, cat.id)
+                assertEquals("购物", cat.name)
+                assertEquals("ic_shopping", cat.icon)
+                assertEquals("#9C27B0", cat.color)
+                assertEquals(3, cat.sortOrder)
+                cancelAndIgnoreRemainingEvents()
             }
         }
     }

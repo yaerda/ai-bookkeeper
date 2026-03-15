@@ -2,7 +2,9 @@ package com.aibookkeeper.core.data.ai
 
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 
 /**
@@ -19,12 +21,13 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
         val isIncome = incomeKeywords.any { input.contains(it) }
         val type = if (isIncome) "INCOME" else "EXPENSE"
         val category = guessCategory(input, isIncome)
+        val date = parseDate(input) ?: LocalDate.now()
 
         ExtractionResult(
             amount = amount,
             type = type,
             category = category,
-            date = LocalDate.now().toString(),
+            date = date.toString(),
             note = input,
             confidence = 0.5f,
             source = ExtractionSource.LOCAL_RULE
@@ -84,6 +87,119 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
             foodItemKeywords.any { input.contains(it) } -> "餐饮"
             input.contains("买") || input.contains("购") || input.contains("超市") -> "购物"
             else -> "其他"
+        }
+    }
+
+    // ── Date parsing ────────────────────────────────────────────────────────
+
+    // Relative day keywords
+    private val relativeDayPattern = Regex("(大前天|前天|昨天|今天)")
+
+    // "X月X日" or "X月X号"
+    private val monthDayPattern = Regex("""(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]""")
+
+    // "YYYY年X月X日"
+    private val fullDatePattern = Regex("""(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]""")
+
+    // ISO-like: "YYYY-MM-DD" or "YYYY/MM/DD"
+    private val isoDatePattern = Regex("""(\d{4})[-/](\d{1,2})[-/](\d{1,2})""")
+
+    // "上周X" / "上个星期X"
+    private val lastWeekPattern = Regex("上(?:个)?(?:周|星期)([一二三四五六日天])")
+
+    // "这周X" / "这个星期X"
+    private val thisWeekPattern = Regex("这(?:个)?(?:周|星期)([一二三四五六日天])")
+
+    // "周X" / "星期X" (without 上/这 prefix, treat as most recent past or today)
+    private val weekdayPattern = Regex("(?:周|星期)([一二三四五六日天])")
+
+    /**
+     * Try to parse a date from the input text.
+     * Returns null if no recognizable date expression is found.
+     */
+    internal fun parseDate(input: String, today: LocalDate = LocalDate.now()): LocalDate? {
+        // 1. Relative days (most common in casual Chinese input)
+        relativeDayPattern.find(input)?.let { match ->
+            return when (match.value) {
+                "今天" -> today
+                "昨天" -> today.minusDays(1)
+                "前天" -> today.minusDays(2)
+                "大前天" -> today.minusDays(3)
+                else -> null
+            }
+        }
+
+        // 2. Full date: "2026年3月15日"
+        fullDatePattern.find(input)?.let { match ->
+            return tryBuildDate(
+                match.groupValues[1].toInt(),
+                match.groupValues[2].toInt(),
+                match.groupValues[3].toInt()
+            )
+        }
+
+        // 3. ISO-like: "2026-03-15" or "2026/03/15"
+        isoDatePattern.find(input)?.let { match ->
+            return tryBuildDate(
+                match.groupValues[1].toInt(),
+                match.groupValues[2].toInt(),
+                match.groupValues[3].toInt()
+            )
+        }
+
+        // 4. "上周X"
+        lastWeekPattern.find(input)?.let { match ->
+            val dow = chineseDayOfWeek(match.groupValues[1]) ?: return@let
+            return today.with(TemporalAdjusters.previous(dow)).let { lastOccurrence ->
+                // Ensure it's actually in the previous week
+                val startOfThisWeek = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                if (lastOccurrence.isBefore(startOfThisWeek)) lastOccurrence
+                else lastOccurrence.minusWeeks(1)
+            }
+        }
+
+        // 5. "这周X"
+        thisWeekPattern.find(input)?.let { match ->
+            val dow = chineseDayOfWeek(match.groupValues[1]) ?: return@let
+            val startOfWeek = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            return startOfWeek.with(TemporalAdjusters.nextOrSame(dow))
+        }
+
+        // 6. "X月X日/号" (default to current year; if future, go back one year)
+        monthDayPattern.find(input)?.let { match ->
+            val month = match.groupValues[1].toInt()
+            val day = match.groupValues[2].toInt()
+            val candidate = tryBuildDate(today.year, month, day) ?: return@let
+            return if (candidate.isAfter(today)) {
+                tryBuildDate(today.year - 1, month, day) ?: candidate
+            } else candidate
+        }
+
+        // 7. Bare "周X"/"星期X" — most recent occurrence
+        weekdayPattern.find(input)?.let { match ->
+            val dow = chineseDayOfWeek(match.groupValues[1]) ?: return@let
+            return today.with(TemporalAdjusters.previousOrSame(dow))
+        }
+
+        return null
+    }
+
+    private fun chineseDayOfWeek(ch: String): DayOfWeek? = when (ch) {
+        "一" -> DayOfWeek.MONDAY
+        "二" -> DayOfWeek.TUESDAY
+        "三" -> DayOfWeek.WEDNESDAY
+        "四" -> DayOfWeek.THURSDAY
+        "五" -> DayOfWeek.FRIDAY
+        "六" -> DayOfWeek.SATURDAY
+        "日", "天" -> DayOfWeek.SUNDAY
+        else -> null
+    }
+
+    private fun tryBuildDate(year: Int, month: Int, day: Int): LocalDate? {
+        return try {
+            LocalDate.of(year, month, day)
+        } catch (_: Exception) {
+            null
         }
     }
 }

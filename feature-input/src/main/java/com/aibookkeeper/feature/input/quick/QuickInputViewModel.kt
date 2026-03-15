@@ -38,6 +38,7 @@ sealed interface QuickInputUiState {
         val amount: Double,
         val category: String,
         val note: String?,
+        val date: String,
         val confidence: Float,
         val originalInput: String
     ) : QuickInputUiState
@@ -96,6 +97,7 @@ class QuickInputViewModel @Inject constructor(
                         amount = result.amount ?: 0.0,
                         category = result.category,
                         note = result.note,
+                        date = result.date,
                         confidence = result.confidence,
                         originalInput = input
                     )

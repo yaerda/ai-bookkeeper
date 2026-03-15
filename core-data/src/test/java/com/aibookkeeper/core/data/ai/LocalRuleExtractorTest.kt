@@ -194,6 +194,128 @@ class LocalRuleExtractorTest {
         assertEquals(todayStr, result.date)
     }
 
+    // ── Date parsing ──
+
+    @Test
+    fun should_parseToday_when_inputContainsToday() = runTest {
+        val result = extractor.extract("今天午饭35元").getOrThrow()
+        assertEquals(todayStr, result.date)
+    }
+
+    @Test
+    fun should_parseYesterday_when_inputContainsYesterday() = runTest {
+        val result = extractor.extract("昨天打车20元").getOrThrow()
+        assertEquals(LocalDate.now().minusDays(1).toString(), result.date)
+    }
+
+    @Test
+    fun should_parseDayBeforeYesterday_when_inputContainsQiantian() = runTest {
+        val result = extractor.extract("前天买菜50元").getOrThrow()
+        assertEquals(LocalDate.now().minusDays(2).toString(), result.date)
+    }
+
+    @Test
+    fun should_parseThreeDaysAgo_when_inputContainsDaqiantian() = runTest {
+        val result = extractor.extract("大前天聚餐200元").getOrThrow()
+        assertEquals(LocalDate.now().minusDays(3).toString(), result.date)
+    }
+
+    @Test
+    fun should_parseMonthDay_when_inputContainsMonthDay() = runTest {
+        val today = LocalDate.now()
+        val targetMonth = today.monthValue
+        val targetDay = today.dayOfMonth
+        val input = "${targetMonth}月${targetDay}日吃饭30元"
+        val result = extractor.extract(input).getOrThrow()
+        assertEquals(today.toString(), result.date)
+    }
+
+    @Test
+    fun should_parseMonthDayHao_when_inputContainsHao() = runTest {
+        val today = LocalDate.now()
+        val input = "${today.monthValue}月${today.dayOfMonth}号午饭20元"
+        val result = extractor.extract(input).getOrThrow()
+        assertEquals(today.toString(), result.date)
+    }
+
+    @Test
+    fun should_parseFullChineseDate_when_yearMonthDay() = runTest {
+        val result = extractor.extract("2026年1月15日买书100元").getOrThrow()
+        assertEquals("2026-01-15", result.date)
+    }
+
+    @Test
+    fun should_parseIsoDate_when_inputContainsDash() = runTest {
+        val result = extractor.extract("2026-02-14情人节晚餐300元").getOrThrow()
+        assertEquals("2026-02-14", result.date)
+    }
+
+    @Test
+    fun should_parseIsoDate_when_inputContainsSlash() = runTest {
+        val result = extractor.extract("2026/01/01元旦聚餐500元").getOrThrow()
+        assertEquals("2026-01-01", result.date)
+    }
+
+    @Test
+    fun should_useTodayDate_when_noDateInInput() = runTest {
+        val result = extractor.extract("咖啡28元").getOrThrow()
+        assertEquals(todayStr, result.date)
+    }
+
+    @Test
+    fun should_parseDateWithParseDate_directly() {
+        val today = LocalDate.of(2026, 3, 15) // A Sunday
+        // Relative days
+        assertEquals(today, extractor.parseDate("今天吃饭", today))
+        assertEquals(today.minusDays(1), extractor.parseDate("昨天打车", today))
+        assertEquals(today.minusDays(2), extractor.parseDate("前天买东西", today))
+        assertEquals(today.minusDays(3), extractor.parseDate("大前天聚餐", today))
+
+        // Month/day
+        assertEquals(LocalDate.of(2026, 3, 10), extractor.parseDate("3月10日吃饭", today))
+        assertEquals(LocalDate.of(2026, 3, 10), extractor.parseDate("3月10号午餐", today))
+
+        // Full date
+        assertEquals(LocalDate.of(2026, 1, 15), extractor.parseDate("2026年1月15日买书", today))
+
+        // ISO-like
+        assertEquals(LocalDate.of(2026, 2, 14), extractor.parseDate("2026-02-14晚餐", today))
+        assertEquals(LocalDate.of(2026, 1, 1), extractor.parseDate("2026/01/01元旦", today))
+
+        // No date
+        assertNull(extractor.parseDate("咖啡28元", today))
+    }
+
+    @Test
+    fun should_parseWeekday_when_inputContainsZhouX() {
+        // 2026-03-15 is a Sunday
+        val today = LocalDate.of(2026, 3, 15)
+        // "周一" → most recent Monday = 2026-03-09
+        assertEquals(LocalDate.of(2026, 3, 9), extractor.parseDate("周一开会", today))
+        // "周日" → today (Sunday) itself
+        assertEquals(LocalDate.of(2026, 3, 15), extractor.parseDate("周日聚餐", today))
+        // "周六" → yesterday (Saturday)
+        assertEquals(LocalDate.of(2026, 3, 14), extractor.parseDate("周六看电影", today))
+    }
+
+    @Test
+    fun should_parseLastWeek_when_inputContainsShangZhou() {
+        val today = LocalDate.of(2026, 3, 15) // Sunday
+        // "上周一" → Monday of the previous week = 2026-03-02
+        assertEquals(LocalDate.of(2026, 3, 2), extractor.parseDate("上周一出差", today))
+        // "上周日" → Sunday of the previous week = 2026-03-08
+        assertEquals(LocalDate.of(2026, 3, 8), extractor.parseDate("上周日聚餐", today))
+    }
+
+    @Test
+    fun should_parseThisWeek_when_inputContainsZheZhou() {
+        val today = LocalDate.of(2026, 3, 12) // Thursday
+        // "这周一" → 2026-03-09
+        assertEquals(LocalDate.of(2026, 3, 9), extractor.parseDate("这周一午饭", today))
+        // "这周五" → 2026-03-13
+        assertEquals(LocalDate.of(2026, 3, 13), extractor.parseDate("这周五聚餐", today))
+    }
+
     @Test
     fun should_setNoteToOriginalInput_when_extracting() = runTest {
         val input = "星巴克咖啡35元"

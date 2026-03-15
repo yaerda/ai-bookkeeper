@@ -498,6 +498,14 @@ private fun PreviewSection(
                 )
             }
 
+            // Date
+            Text(
+                text = "📅 ${preview.date}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
             // Confidence
             if (preview.confidence < 0.7f) {
                 Spacer(modifier = Modifier.height(8.dp))

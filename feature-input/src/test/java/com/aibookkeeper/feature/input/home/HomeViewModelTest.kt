@@ -295,4 +295,105 @@ class HomeViewModelTest {
             assertEquals(currentMonth, vm.uiState.value.currentMonth)
         }
     }
+
+    // ── Category grid for navigation ─────────────────────────────────────
+
+    @Nested
+    inner class CategoryGridNavigation {
+
+        @Test
+        fun should_exposeCategoryIds_when_categoriesLoaded() = runTest {
+            val categories = listOf(
+                createCategory(id = 10, name = "餐饮"),
+                createCategory(id = 20, name = "交通", icon = "ic_transport", color = "#2196F3"),
+                createCategory(id = 30, name = "购物", icon = "ic_shopping", color = "#9C27B0")
+            )
+            val vm = createViewModel(categories = categories)
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(3, loaded.expenseCategories.size)
+                assertEquals(10L, loaded.expenseCategories[0].id)
+                assertEquals(20L, loaded.expenseCategories[1].id)
+                assertEquals(30L, loaded.expenseCategories[2].id)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_preserveCategoryProperties_when_loaded() = runTest {
+            val categories = listOf(
+                createCategory(id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722")
+            )
+            val vm = createViewModel(categories = categories)
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                val cat = loaded.expenseCategories[0]
+                assertEquals(1L, cat.id)
+                assertEquals("餐饮", cat.name)
+                assertEquals("ic_food", cat.icon)
+                assertEquals("#FF5722", cat.color)
+                assertEquals(TransactionType.EXPENSE, cat.type)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_returnEmptyCategories_when_noExpenseCategoriesExist() = runTest {
+            val vm = createViewModel(categories = emptyList())
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertTrue(loaded.expenseCategories.isEmpty())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_loadManyCategories_when_moreThan8Exist() = runTest {
+            val categories = (1..12L).map { i ->
+                createCategory(id = i, name = "分类$i")
+            }
+            val vm = createViewModel(categories = categories)
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                // ViewModel exposes all categories; UI layer does take(8)
+                assertEquals(12, loaded.expenseCategories.size)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_combineCategoriersWithTransactions_when_bothExist() = runTest {
+            val categories = listOf(
+                createCategory(id = 1, name = "餐饮"),
+                createCategory(id = 2, name = "交通", icon = "ic_transport", color = "#2196F3")
+            )
+            val transactions = listOf(
+                createTransaction(id = 1, amount = 35.0),
+                createTransaction(id = 2, amount = 20.0)
+            )
+            val vm = createViewModel(
+                categories = categories,
+                transactions = transactions,
+                monthExpense = 55.0
+            )
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(2, loaded.expenseCategories.size)
+                assertEquals(2, loaded.recentTransactions.size)
+                assertEquals(55.0, loaded.monthExpense)
+                assertFalse(loaded.isLoading)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
 }

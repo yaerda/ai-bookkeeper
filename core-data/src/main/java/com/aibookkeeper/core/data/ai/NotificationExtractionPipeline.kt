@@ -121,6 +121,11 @@ class NotificationExtractionPipeline @Inject constructor(
                 val data = result.getOrThrow()
                 val categoryId = resolveCategoryId(data)
                 val now = LocalDateTime.now()
+                val parsedDate = try {
+                    LocalDate.parse(data.date).atStartOfDay()
+                } catch (e: Exception) {
+                    now
+                }
 
                 val txResult = transactionRepository.create(
                     com.aibookkeeper.core.data.model.Transaction(
@@ -130,7 +135,7 @@ class NotificationExtractionPipeline @Inject constructor(
                         merchantName = data.merchantName,
                         note = data.note,
                         originalInput = event.rawContent,
-                        date = now,
+                        date = parsedDate,
                         createdAt = now,
                         updatedAt = now,
                         source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
