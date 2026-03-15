@@ -77,7 +77,7 @@ class LocalRuleExtractorTest {
 
     @Test
     fun should_categorizeAsShopping_when_inputContainsShoppingKeyword() = runTest {
-        val inputs = listOf("买了件衣服200", "购物500", "超市120")
+        val inputs = listOf("买东西200", "购物500", "超市120")
         for (input in inputs) {
             val result = extractor.extract(input).getOrThrow()
             assertEquals("购物", result.category, "Failed for input: $input")
