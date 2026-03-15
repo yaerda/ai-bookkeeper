@@ -19,18 +19,18 @@ class ExtractionStrategyManager @Inject constructor(
         private const val TAG = "ExtractionStrategy"
     }
 
-    suspend fun extract(input: String): Result<ExtractionResult> {
-        return tryOnlineThenFallback { onlineExtractor.extract(input) }
-            ?: localExtractor.extract(input)
+    suspend fun extract(input: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
+        return tryOnlineThenFallback { onlineExtractor.extract(input, categoryNames) }
+            ?: localExtractor.extract(input, categoryNames)
     }
 
-    suspend fun extractOnline(input: String): Result<ExtractionResult> {
-        return onlineExtractor.extract(input)
+    suspend fun extractOnline(input: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
+        return onlineExtractor.extract(input, categoryNames)
     }
 
-    suspend fun extractFromOcr(ocrText: String): Result<ExtractionResult> {
-        return tryOnlineThenFallback { onlineExtractor.extractFromOcr(ocrText) }
-            ?: localExtractor.extractFromOcr(ocrText)
+    suspend fun extractFromOcr(ocrText: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
+        return tryOnlineThenFallback { onlineExtractor.extractFromOcr(ocrText, categoryNames) }
+            ?: localExtractor.extractFromOcr(ocrText, categoryNames)
     }
 
     /**

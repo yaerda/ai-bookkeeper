@@ -93,10 +93,12 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _aiStatus.value = AiStatus.Processing
             try {
-                val result = aiExtractionRepository.extract(text).getOrThrow()
+                // Pass all category names to AI so it can match custom categories
+                val categories = categoryRepository.observeExpenseCategories().stateIn(viewModelScope).value
+                val categoryNames = categories.map { it.name }
+                val result = aiExtractionRepository.extract(text, categoryNames).getOrThrow()
                 val amount = result.amount ?: 0.0
                 val type = if (result.type == "income") TransactionType.INCOME else TransactionType.EXPENSE
-                val categories = categoryRepository.observeExpenseCategories().stateIn(viewModelScope).value
                 val matchedCategory = categories.find { it.name == result.category }
                 val date = try { LocalDate.parse(result.date) } catch (_: Exception) { LocalDate.now() }
 

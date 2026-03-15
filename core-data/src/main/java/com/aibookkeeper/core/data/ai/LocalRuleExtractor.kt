@@ -16,11 +16,11 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
     private val amountPattern = Regex("""(\d+\.?\d*)\s*(元|块|¥)?""")
     private val incomeKeywords = listOf("收到", "工资", "奖金", "红包", "收入", "进账")
 
-    override suspend fun extract(input: String): Result<ExtractionResult> = runCatching {
+    override suspend fun extract(input: String, categoryNames: List<String>): Result<ExtractionResult> = runCatching {
         val amount = amountPattern.find(input)?.groupValues?.get(1)?.toDoubleOrNull()
         val isIncome = incomeKeywords.any { input.contains(it) }
         val type = if (isIncome) "INCOME" else "EXPENSE"
-        val category = guessCategory(input, isIncome)
+        val category = guessCategory(input, isIncome, categoryNames)
         val date = parseDate(input) ?: LocalDate.now()
 
         ExtractionResult(
@@ -34,8 +34,8 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
         )
     }
 
-    override suspend fun extractFromOcr(ocrText: String): Result<ExtractionResult> =
-        extract(ocrText)
+    override suspend fun extractFromOcr(ocrText: String, categoryNames: List<String>): Result<ExtractionResult> =
+        extract(ocrText, categoryNames)
 
     // Common food/grocery item keywords — matched before the generic "买/购" pattern
     // so that "买芒果", "买牛奶" etc. are categorized as "餐饮" instead of "购物".
@@ -62,7 +62,7 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
         "烧烤", "火锅", "快餐", "便当", "蛋糕", "甜品", "冰淇淋", "粥",
     )
 
-    private fun guessCategory(input: String, isIncome: Boolean): String {
+    private fun guessCategory(input: String, isIncome: Boolean, customCategories: List<String> = emptyList()): String {
         if (isIncome) {
             return when {
                 input.contains("工资") -> "工资"
@@ -71,8 +71,11 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
                 else -> "其他"
             }
         }
-        // Specific categories must be checked before the broad "购物" pattern (买/购),
-        // otherwise "买药","买书","买衣服" would all match "购物" instead of their specific category.
+        // Check custom categories first — user-defined categories take priority
+        for (cat in customCategories) {
+            if (input.contains(cat)) return cat
+        }
+        // Specific categories must be checked before the broad "购物" pattern (买/购)
         return when {
             input.contains("吃") || input.contains("饭") || input.contains("餐") ||
                 input.contains("外卖") || input.contains("咖啡") || input.contains("奶茶") -> "餐饮"

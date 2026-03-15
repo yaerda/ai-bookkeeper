@@ -406,8 +406,8 @@ private fun ManualInputForm(
             text = {
                 OutlinedTextField(
                     value = newCategoryName,
-                    onValueChange = { newCategoryName = it },
-                    label = { Text("分类名称") },
+                    onValueChange = { if (it.length <= 6) newCategoryName = it },
+                    label = { Text("分类名称（最多6字符）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )

@@ -413,7 +413,7 @@ private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit 
                 text = transaction.categoryName ?: "未分类",
                 style = MaterialTheme.typography.bodyLarge
             )
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 val noteText = transaction.note
                 if (!noteText.isNullOrBlank()) {
                     Text(
