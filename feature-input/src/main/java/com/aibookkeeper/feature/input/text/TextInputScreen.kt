@@ -44,7 +44,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,8 +51,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -163,14 +160,7 @@ private fun AiInputSection(
     }
     var showManualForm by remember(initialCategory) { mutableStateOf(initialCategory != null) }
     var gridSelectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
-    val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-
-    LaunchedEffect(initialCategory) {
-        if (initialCategory == null) {
-            focusRequester.requestFocus()
-        }
-    }
 
     // AI text input
     Text(
@@ -188,9 +178,7 @@ private fun AiInputSection(
     OutlinedTextField(
         value = inputText,
         onValueChange = { inputText = it },
-        modifier = Modifier
-            .fillMaxWidth()
-            .focusRequester(focusRequester),
+        modifier = Modifier.fillMaxWidth(),
         placeholder = { Text("例如：午饭35、打车到公司15、星巴克拿铁28") },
         trailingIcon = {
             if (inputText.isNotBlank()) {
@@ -278,7 +266,8 @@ private fun AiInputSection(
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        maxItemsInEachRow = 4
     ) {
         categories.take(8).forEach { cat ->
             CategoryGridItem(
@@ -286,7 +275,8 @@ private fun AiInputSection(
                 onClick = {
                     gridSelectedCategory = cat
                     showManualForm = true
-                }
+                },
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -647,13 +637,14 @@ private fun ErrorSection(
 @Composable
 private fun CategoryGridItem(
     category: Category,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val emoji = CategoryIconMapper.getEmoji(category.icon)
     val bgColor = parseCategoryColor(category.color)
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(8.dp),

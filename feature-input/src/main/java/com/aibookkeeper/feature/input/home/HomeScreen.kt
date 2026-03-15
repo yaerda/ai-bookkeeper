@@ -180,7 +180,7 @@ fun HomeScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(80.dp))
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
         }
@@ -436,12 +436,14 @@ private fun QuickCategorySection(
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            maxItemsInEachRow = 4
         ) {
             categories.take(8).forEach { category ->
                 CategoryChip(
                     category = category,
-                    onClick = { onCategoryClick(category) }
+                    onClick = { onCategoryClick(category) },
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -451,13 +453,14 @@ private fun QuickCategorySection(
 @Composable
 private fun CategoryChip(
     category: Category,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val emoji = CategoryIconMapper.getEmoji(category.icon)
     val bgColor = parseCategoryColor(category.color)
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(8.dp),
