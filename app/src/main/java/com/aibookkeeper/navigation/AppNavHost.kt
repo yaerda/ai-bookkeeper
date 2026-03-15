@@ -106,7 +106,7 @@ fun AppNavHost() {
                                                     saveState = true
                                                 }
                                                 launchSingleTop = true
-                                                restoreState = true
+                                                restoreState = false
                                             }
                                         },
                                         modifier = Modifier
@@ -124,14 +124,14 @@ fun AppNavHost() {
                                     }
                                 },
                                 label = { Text(item.label) },
-                                selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                                selected = currentRoute?.startsWith("text_input") == true,
                                 onClick = {
                                     navController.navigate(item.navigateRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState = false
                                     }
                                 }
                             )

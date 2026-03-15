@@ -84,12 +84,7 @@ fun TextInputScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("记账") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+                title = { Text("记账") }
             )
         },
         modifier = modifier
