@@ -1,9 +1,12 @@
 package com.aibookkeeper.feature.input.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -26,10 +30,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -135,10 +141,15 @@ fun TransactionDetailScreen(
             }
 
             is DetailUiState.Loaded -> {
+                val categories by viewModel.categories.collectAsStateWithLifecycle()
                 TransactionDetailContent(
                     transaction = state.transaction,
+                    categories = categories,
                     onDelete = {
                         viewModel.deleteTransaction { navController.popBackStack() }
+                    },
+                    onUpdate = { amount, catId, catName, note, date ->
+                        viewModel.updateTransaction(amount, catId, catName, note, date)
                     },
                     modifier = Modifier.padding(innerPadding)
                 )
@@ -147,13 +158,22 @@ fun TransactionDetailScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TransactionDetailContent(
     transaction: Transaction,
+    categories: List<com.aibookkeeper.core.data.model.Category>,
     onDelete: () -> Unit,
+    onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editAmount by remember(transaction) { mutableStateOf("%.2f".format(transaction.amount)) }
+    var editNote by remember(transaction) { mutableStateOf(transaction.note ?: "") }
+    var editCategoryId by remember(transaction) { mutableStateOf(transaction.categoryId) }
+    var editCategoryName by remember(transaction) { mutableStateOf(transaction.categoryName ?: "") }
+    var editDate by remember(transaction) { mutableStateOf(transaction.date) }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -251,48 +271,131 @@ private fun TransactionDetailContent(
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                DetailRow(label = "类型", value = if (transaction.type == TransactionType.INCOME) "收入" else "支出")
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                DetailRow(
-                    label = "时间",
-                    value = transaction.date.toFriendlyDateTimeString()
-                )
-
-                if (!transaction.merchantName.isNullOrBlank()) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "商户", value = transaction.merchantName.orEmpty())
-                }
-
-                if (!transaction.note.isNullOrBlank()) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "备注", value = transaction.note.orEmpty())
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                DetailRow(label = "来源", value = formatSource(transaction.source))
-
-                if (transaction.aiConfidence != null) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(
-                        label = "AI 置信度",
-                        value = "${"%.0f".format((transaction.aiConfidence ?: 0f) * 100)}%"
+                if (isEditing) {
+                    // Editable amount
+                    OutlinedTextField(
+                        value = editAmount,
+                        onValueChange = { v ->
+                            if (v.isEmpty() || v.matches(Regex("^\\d*\\.?\\d{0,2}$"))) editAmount = v
+                        },
+                        label = { Text("金额") },
+                        prefix = { Text("¥") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
-                }
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                if (!transaction.originalInput.isNullOrBlank()) {
+                    // Category selection
+                    Text("分类", style = MaterialTheme.typography.labelLarge)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        categories.forEach { cat ->
+                            val emoji = CategoryIconMapper.getEmoji(cat.icon)
+                            FilterChip(
+                                selected = editCategoryId == cat.id,
+                                onClick = { editCategoryId = cat.id; editCategoryName = cat.name },
+                                label = { Text("$emoji ${cat.name}") }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Note
+                    OutlinedTextField(
+                        value = editNote,
+                        onValueChange = { editNote = it },
+                        label = { Text("备注") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Date display (editable via DatePicker would be ideal, for now show text)
+                    DetailRow(
+                        label = "日期",
+                        value = editDate.toLocalDate().toString()
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { isEditing = false },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("取消") }
+                        Button(
+                            onClick = {
+                                val amount = editAmount.toDoubleOrNull() ?: transaction.amount
+                                onUpdate(amount, editCategoryId, editCategoryName, editNote.ifBlank { null }, editDate)
+                                isEditing = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("保存") }
+                    }
+                } else {
+                    // Read-only view
+                    DetailRow(label = "类型", value = if (transaction.type == TransactionType.INCOME) "收入" else "支出")
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "原始输入", value = transaction.originalInput.orEmpty())
-                }
+                    DetailRow(label = "时间", value = transaction.date.toFriendlyDateTimeString())
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                DetailRow(
-                    label = "创建时间",
-                    value = transaction.createdAt.toFriendlyFullDateTimeString()
-                )
+                    if (!transaction.merchantName.isNullOrBlank()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        DetailRow(label = "商户", value = transaction.merchantName.orEmpty())
+                    }
+
+                    if (!transaction.note.isNullOrBlank()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        DetailRow(label = "备注", value = transaction.note.orEmpty())
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    DetailRow(label = "来源", value = formatSource(transaction.source))
+
+                    if (transaction.aiConfidence != null) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        DetailRow(
+                            label = "AI 置信度",
+                            value = "${"%.0f".format((transaction.aiConfidence ?: 0f) * 100)}%"
+                        )
+                    }
+
+                    if (!transaction.originalInput.isNullOrBlank()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        DetailRow(label = "原始输入", value = transaction.originalInput.orEmpty())
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    DetailRow(label = "创建时间", value = transaction.createdAt.toFriendlyFullDateTimeString())
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Edit button
+        if (!isEditing) {
+            Button(
+                onClick = { isEditing = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("编辑")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // Delete button
         Button(

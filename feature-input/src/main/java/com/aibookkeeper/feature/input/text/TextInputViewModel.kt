@@ -195,4 +195,12 @@ class TextInputViewModel @Inject constructor(
             )
         }
     }
+
+    fun updateCategory(category: Category, newName: String, newIcon: String) {
+        viewModelScope.launch {
+            categoryRepository.update(
+                category.copy(name = newName, icon = newIcon)
+            )
+        }
+    }
 }

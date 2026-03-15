@@ -1,8 +1,10 @@
 package com.aibookkeeper.feature.input.text
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -105,7 +107,8 @@ fun TextInputScreen(
                         onManualSave = { amount, categoryId, categoryName, note, type ->
                             viewModel.saveManual(amount, categoryId, categoryName, note, type)
                         },
-                        onAddCategory = viewModel::addCategory
+                        onAddCategory = viewModel::addCategory,
+                        onUpdateCategory = { cat, name, icon -> viewModel.updateCategory(cat, name, icon) }
                     )
                 }
                 is TextInputUiState.Extracting -> {
@@ -150,7 +153,8 @@ private fun AiInputSection(
     initialCategoryId: Long? = null,
     onSubmitText: (String) -> Unit,
     onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
-    onAddCategory: (String) -> Unit = {}
+    onAddCategory: (String) -> Unit = {},
+    onUpdateCategory: (Category, String, String) -> Unit = { _, _, _ -> }
 ) {
     var inputText by remember { mutableStateOf("") }
     val initialCategory = remember(initialCategoryId, categories) {
@@ -158,6 +162,7 @@ private fun AiInputSection(
     }
     var showManualForm by remember(initialCategory) { mutableStateOf(initialCategory != null) }
     var gridSelectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
+    var editingCategory by remember { mutableStateOf<Category?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     // AI text input
@@ -243,6 +248,7 @@ private fun AiInputSection(
                     gridSelectedCategory = cat
                     showManualForm = true
                 },
+                onLongClick = { editingCategory = cat },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -273,6 +279,18 @@ private fun AiInputSection(
             onSave = onManualSave,
             onAddCategory = onAddCategory,
             initialCategory = gridSelectedCategory
+        )
+    }
+
+    // Edit category dialog
+    editingCategory?.let { cat ->
+        EditCategoryDialog(
+            category = cat,
+            onDismiss = { editingCategory = null },
+            onConfirm = { newName, newIcon ->
+                onUpdateCategory(cat, newName, newIcon)
+                editingCategory = null
+            }
         )
     }
 }
@@ -658,10 +676,12 @@ private fun ErrorSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryGridItem(
     category: Category,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val emoji = CategoryIconMapper.getEmoji(category.icon)
@@ -670,7 +690,7 @@ private fun CategoryGridItem(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -690,6 +710,66 @@ private fun CategoryGridItem(
             color = MaterialTheme.colorScheme.onSurface
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditCategoryDialog(
+    category: Category,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, icon: String) -> Unit
+) {
+    var name by remember { mutableStateOf(category.name) }
+    var selectedIcon by remember { mutableStateOf(category.icon) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑分类") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { if (it.length <= 6) name = it },
+                    label = { Text("分类名称（最多6字符）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("选择图标", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    CategoryIconMapper.allIcons.forEach { (iconKey, emoji) ->
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selectedIcon == iconKey)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .clickable { selectedIcon = iconKey },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = emoji, fontSize = 20.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (name.isNotBlank()) onConfirm(name, selectedIcon) },
+                enabled = name.isNotBlank()
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 private fun parseCategoryColor(colorStr: String?): Color {
