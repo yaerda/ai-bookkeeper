@@ -249,9 +249,10 @@ private fun SummaryCards(
                 )
                 Text(
                     text = "${if (balance >= 0) "" else "-"}¥${"%.2f".format(kotlin.math.abs(balance))}",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (balance >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                    color = if (balance >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                    maxLines = 1
                 )
             }
         }
