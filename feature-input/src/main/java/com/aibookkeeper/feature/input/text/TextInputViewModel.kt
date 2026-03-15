@@ -181,4 +181,18 @@ class TextInputViewModel @Inject constructor(
         _uiState.value = TextInputUiState.Idle
         lastExtractionResult = null
     }
+
+    fun addCategory(name: String) {
+        viewModelScope.launch {
+            categoryRepository.create(
+                Category(
+                    name = name,
+                    icon = "tag",
+                    color = "#607D8B",
+                    type = TransactionType.EXPENSE,
+                    isSystem = false
+                )
+            )
+        }
+    }
 }

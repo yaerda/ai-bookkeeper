@@ -104,7 +104,8 @@ fun TextInputScreen(
                         onSubmitText = viewModel::submitText,
                         onManualSave = { amount, categoryId, categoryName, note, type ->
                             viewModel.saveManual(amount, categoryId, categoryName, note, type)
-                        }
+                        },
+                        onAddCategory = viewModel::addCategory
                     )
                 }
                 is TextInputUiState.Extracting -> {
@@ -148,7 +149,8 @@ private fun AiInputSection(
     categories: List<Category>,
     initialCategoryId: Long? = null,
     onSubmitText: (String) -> Unit,
-    onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit
+    onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
+    onAddCategory: (String) -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
     val initialCategory = remember(initialCategoryId, categories) {
@@ -269,6 +271,7 @@ private fun AiInputSection(
         ManualInputForm(
             categories = categories,
             onSave = onManualSave,
+            onAddCategory = onAddCategory,
             initialCategory = gridSelectedCategory
         )
     }
@@ -279,12 +282,16 @@ private fun AiInputSection(
 private fun ManualInputForm(
     categories: List<Category>,
     onSave: (Double, Long?, String, String?, TransactionType) -> Unit,
+    onAddCategory: (String) -> Unit = {},
     initialCategory: Category? = null
 ) {
     var amountText by remember { mutableStateOf("") }
     var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var note by remember { mutableStateOf("") }
     var isExpense by remember { mutableStateOf(true) }
+
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
 
     Card(
         modifier = Modifier
@@ -354,6 +361,12 @@ private fun ManualInputForm(
                         label = { Text("$emoji ${cat.name}") }
                     )
                 }
+                // Add custom category button
+                FilterChip(
+                    selected = false,
+                    onClick = { showAddCategoryDialog = true },
+                    label = { Text("＋ 新分类") }
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -384,6 +397,37 @@ private fun ManualInputForm(
                 Text("保存")
             }
         }
+    }
+
+    if (showAddCategoryDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAddCategoryDialog = false; newCategoryName = "" },
+            title = { Text("添加新分类") },
+            text = {
+                OutlinedTextField(
+                    value = newCategoryName,
+                    onValueChange = { newCategoryName = it },
+                    label = { Text("分类名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newCategoryName.isNotBlank()) {
+                            onAddCategory(newCategoryName)
+                            showAddCategoryDialog = false
+                            newCategoryName = ""
+                        }
+                    },
+                    enabled = newCategoryName.isNotBlank()
+                ) { Text("添加") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddCategoryDialog = false; newCategoryName = "" }) { Text("取消") }
+            }
+        )
     }
 }
 

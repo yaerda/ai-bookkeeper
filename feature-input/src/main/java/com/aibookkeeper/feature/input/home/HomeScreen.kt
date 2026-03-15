@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -243,15 +244,52 @@ fun HomeScreen(
                 Button(
                     onClick = {
                         if (aiInput.isNotBlank()) {
-                            navController.navigate(InputRoutes.textInput())
-                            showAiSheet = false
+                            viewModel.submitAiInput(aiInput)
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    enabled = aiInput.isNotBlank()
+                    enabled = aiInput.isNotBlank() && uiState.aiStatus !is AiStatus.Processing
                 ) {
-                    Text("AI 识别并记账", modifier = Modifier.padding(vertical = 4.dp))
+                    if (uiState.aiStatus is AiStatus.Processing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("识别中...")
+                    } else {
+                        Text("AI 识别并记账", modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+
+                // Show result
+                when (val status = uiState.aiStatus) {
+                    is AiStatus.Success -> {
+                        Text(
+                            text = "✅ 记账成功：${status.message}",
+                            color = Color(0xFF4CAF50),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        // Auto close after success
+                        LaunchedEffect(status) {
+                            kotlinx.coroutines.delay(1500)
+                            aiInput = ""
+                            viewModel.resetAiStatus()
+                            showAiSheet = false
+                        }
+                    }
+                    is AiStatus.Error -> {
+                        Text(
+                            text = "❌ ${status.message}",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    else -> {}
                 }
             }
         }
