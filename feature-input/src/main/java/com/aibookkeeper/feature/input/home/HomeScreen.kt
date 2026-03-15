@@ -275,18 +275,6 @@ private fun ExpandableFab(
             )
         }
     }
-
-    // Dismiss on background tap when expanded
-    if (expanded) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() }
-                ) { expanded = false }
-        )
-    }
 }
 
 @Composable

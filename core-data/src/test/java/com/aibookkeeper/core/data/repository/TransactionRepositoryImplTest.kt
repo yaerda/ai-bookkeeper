@@ -199,6 +199,157 @@ class TransactionRepositoryImplTest {
         }
     }
 
+    // ── observeById ──────────────────────────────────────────────────────
+
+    @Nested
+    inner class ObserveById {
+
+        @Test
+        fun should_enrichCategoryInfo_when_observingById() = runTest {
+            every { transactionDao.observeById(1L) } returns flowOf(sampleEntity)
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val result = repository.observeById(1L).first()
+
+            assertNotNull(result)
+            assertEquals("餐饮", result?.categoryName)
+            assertEquals("ic_food", result?.categoryIcon)
+            assertEquals("#FF5722", result?.categoryColor)
+        }
+
+        @Test
+        fun should_returnNull_when_entityNotFound() = runTest {
+            every { transactionDao.observeById(999L) } returns flowOf(null)
+
+            val result = repository.observeById(999L).first()
+
+            assertNull(result)
+        }
+
+        @Test
+        fun should_returnNullCategoryName_when_categoryIdIsNull() = runTest {
+            val entityNoCat = sampleEntity.copy(categoryId = null)
+            val domainNoCat = sampleDomain.copy(categoryId = null)
+            every { transactionDao.observeById(1L) } returns flowOf(entityNoCat)
+            every { mapper.toDomain(entityNoCat) } returns domainNoCat
+
+            val result = repository.observeById(1L).first()
+
+            assertNotNull(result)
+            assertNull(result?.categoryName)
+        }
+    }
+
+    // ── observeByDateRange ───────────────────────────────────────────────
+
+    @Nested
+    inner class ObserveByDateRange {
+
+        @Test
+        fun should_enrichCategoryInfo_when_observingByDateRange() = runTest {
+            every {
+                transactionDao.observeByDateRange(any(), any())
+            } returns flowOf(listOf(sampleEntity))
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val start = LocalDateTime.of(2026, 3, 1, 0, 0)
+            val end = LocalDateTime.of(2026, 3, 31, 23, 59, 59)
+            val result = repository.observeByDateRange(start, end).first()
+
+            assertEquals(1, result.size)
+            assertEquals("餐饮", result[0].categoryName)
+            assertEquals("ic_food", result[0].categoryIcon)
+            assertEquals("#FF5722", result[0].categoryColor)
+        }
+
+        @Test
+        fun should_returnEmptyList_when_noTransactionsInRange() = runTest {
+            every {
+                transactionDao.observeByDateRange(any(), any())
+            } returns flowOf(emptyList())
+
+            val start = LocalDateTime.of(2026, 1, 1, 0, 0)
+            val end = LocalDateTime.of(2026, 1, 31, 23, 59, 59)
+            val result = repository.observeByDateRange(start, end).first()
+
+            assertTrue(result.isEmpty())
+        }
+    }
+
+    // ── observePendingTransactions ────────────────────────────────────────
+
+    @Nested
+    inner class ObservePendingTransactions {
+
+        @Test
+        fun should_enrichCategoryInfo_when_observingPending() = runTest {
+            val pendingEntity = sampleEntity.copy(status = "PENDING")
+            val pendingDomain = sampleDomain.copy(status = TransactionStatus.PENDING)
+            every {
+                transactionDao.observeByStatus("PENDING")
+            } returns flowOf(listOf(pendingEntity))
+            every { mapper.toDomain(pendingEntity) } returns pendingDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val result = repository.observePendingTransactions().first()
+
+            assertEquals(1, result.size)
+            assertEquals("餐饮", result[0].categoryName)
+            assertEquals("ic_food", result[0].categoryIcon)
+            assertEquals("#FF5722", result[0].categoryColor)
+        }
+
+        @Test
+        fun should_returnEmptyList_when_noPendingTransactions() = runTest {
+            every {
+                transactionDao.observeByStatus("PENDING")
+            } returns flowOf(emptyList())
+
+            val result = repository.observePendingTransactions().first()
+
+            assertTrue(result.isEmpty())
+        }
+    }
+
+    // ── observeByCategoryAndMonth ─────────────────────────────────────────
+
+    @Nested
+    inner class ObserveByCategoryAndMonth {
+
+        @Test
+        fun should_enrichCategoryInfo_when_observingByCategoryAndMonth() = runTest {
+            every {
+                transactionDao.observeByCategoryAndDateRange(eq(2L), any(), any())
+            } returns flowOf(listOf(sampleEntity))
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val result = repository.observeByCategoryAndMonth(
+                2L, java.time.YearMonth.of(2026, 3)
+            ).first()
+
+            assertEquals(1, result.size)
+            assertEquals("餐饮", result[0].categoryName)
+            assertEquals("ic_food", result[0].categoryIcon)
+            assertEquals("#FF5722", result[0].categoryColor)
+        }
+
+        @Test
+        fun should_returnEmptyList_when_noCategoryTransactions() = runTest {
+            every {
+                transactionDao.observeByCategoryAndDateRange(eq(5L), any(), any())
+            } returns flowOf(emptyList())
+
+            val result = repository.observeByCategoryAndMonth(
+                5L, java.time.YearMonth.of(2026, 3)
+            ).first()
+
+            assertTrue(result.isEmpty())
+        }
+    }
+
     // ── update ───────────────────────────────────────────────────────────
 
     @Nested
@@ -301,11 +452,26 @@ class TransactionRepositoryImplTest {
         fun should_returnMappedResults_when_searchFindsMatches() = runTest {
             coEvery { transactionDao.search("星巴克") } returns listOf(sampleEntity)
             every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
 
             val results = repository.search("星巴克")
 
             assertEquals(1, results.size)
             assertEquals("星巴克", results[0].merchantName)
+        }
+
+        @Test
+        fun should_enrichCategoryInfo_when_searchFindsMatches() = runTest {
+            coEvery { transactionDao.search("星巴克") } returns listOf(sampleEntity)
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val results = repository.search("星巴克")
+
+            assertEquals(1, results.size)
+            assertEquals("餐饮", results[0].categoryName)
+            assertEquals("ic_food", results[0].categoryIcon)
+            assertEquals("#FF5722", results[0].categoryColor)
         }
 
         @Test
@@ -327,10 +493,25 @@ class TransactionRepositoryImplTest {
         fun should_returnPendingSyncTransactions_when_called() = runTest {
             coEvery { transactionDao.getPendingSyncTransactions() } returns listOf(sampleEntity)
             every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
 
             val results = repository.getPendingSync()
 
             assertEquals(1, results.size)
+        }
+
+        @Test
+        fun should_enrichCategoryInfo_when_getPendingSync() = runTest {
+            coEvery { transactionDao.getPendingSyncTransactions() } returns listOf(sampleEntity)
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val results = repository.getPendingSync()
+
+            assertEquals(1, results.size)
+            assertEquals("餐饮", results[0].categoryName)
+            assertEquals("ic_food", results[0].categoryIcon)
+            assertEquals("#FF5722", results[0].categoryColor)
         }
 
         @Test
