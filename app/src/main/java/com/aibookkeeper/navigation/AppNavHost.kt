@@ -41,11 +41,17 @@ private const val ROUTE_ONBOARDING = "onboarding"
 sealed class BottomNavItem(
     val route: String,
     val icon: ImageVector,
-    val label: String
+    val label: String,
+    val navigateRoute: String = route
 ) {
     data object Home : BottomNavItem(InputRoutes.HOME, Icons.Default.Home, "首页")
     data object Stats : BottomNavItem("stats", Icons.Default.BarChart, "统计")
-    data object Add : BottomNavItem(InputRoutes.TEXT_INPUT, Icons.Default.Add, "记账")
+    data object Add : BottomNavItem(
+        route = InputRoutes.TEXT_INPUT,
+        icon = Icons.Default.Add,
+        label = "记账",
+        navigateRoute = InputRoutes.textInput()
+    )
     data object Bills : BottomNavItem(InputRoutes.BILLS, Icons.Default.Receipt, "账单")
     data object Settings : BottomNavItem("settings", Icons.Default.Settings, "设置")
 }
@@ -86,7 +92,7 @@ fun AppNavHost() {
                                 icon = {
                                     FloatingActionButton(
                                         onClick = {
-                                            navController.navigate(item.route) {
+                                            navController.navigate(item.navigateRoute) {
                                                 popUpTo(navController.graph.findStartDestination().id) {
                                                     saveState = true
                                                 }
@@ -111,7 +117,7 @@ fun AppNavHost() {
                                 label = { Text(item.label) },
                                 selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
                                 onClick = {
-                                    navController.navigate(item.route) {
+                                    navController.navigate(item.navigateRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }
@@ -126,7 +132,7 @@ fun AppNavHost() {
                                 label = { Text(item.label) },
                                 selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
                                 onClick = {
-                                    navController.navigate(item.route) {
+                                    navController.navigate(item.navigateRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }

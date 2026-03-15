@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -103,7 +104,8 @@ fun HomeScreen(
         },
         floatingActionButton = {
             ExpandableFab(
-                onTextInput = { navController.navigate(InputRoutes.TEXT_INPUT) },
+                onTextInput = { navController.navigate(InputRoutes.textInput()) },
+                onVoice = { /* TODO: Navigate to voice input when implemented */ },
                 onCamera = { navController.navigate("capture") }
             )
         },
@@ -125,7 +127,7 @@ fun HomeScreen(
             // AI quick input bar
             item {
                 AiQuickInputBar(
-                    onClick = { navController.navigate(InputRoutes.TEXT_INPUT) }
+                    onClick = { navController.navigate(InputRoutes.textInput()) }
                 )
             }
 
@@ -134,7 +136,7 @@ fun HomeScreen(
                 QuickCategorySection(
                     categories = uiState.expenseCategories,
                     onCategoryClick = { category ->
-                        navController.navigate(InputRoutes.TEXT_INPUT)
+                        navController.navigate(InputRoutes.textInput(categoryId = category.id))
                     }
                 )
             }
@@ -206,6 +208,7 @@ private fun LoadingState() {
 @Composable
 private fun ExpandableFab(
     onTextInput: () -> Unit,
+    onVoice: () -> Unit,
     onCamera: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -249,6 +252,28 @@ private fun ExpandableFab(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
+                        text = "语音记账",
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    SmallFloatingActionButton(
+                        onClick = {
+                            expanded = false
+                            onVoice()
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "语音记账")
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
                         text = "文字记账",
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier
@@ -264,7 +289,7 @@ private fun ExpandableFab(
                             expanded = false
                             onTextInput()
                         },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = "文字记账")
                     }

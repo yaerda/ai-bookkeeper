@@ -76,6 +76,7 @@ import com.aibookkeeper.core.data.model.TransactionType
 fun TextInputScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
+    initialCategoryId: Long? = null,
     viewModel: TextInputViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -106,6 +107,7 @@ fun TextInputScreen(
                 is TextInputUiState.Idle -> {
                     AiInputSection(
                         categories = categories,
+                        initialCategoryId = initialCategoryId,
                         onSubmitText = viewModel::submitText,
                         onManualSave = { amount, categoryId, categoryName, note, type ->
                             viewModel.saveManual(amount, categoryId, categoryName, note, type)
@@ -151,17 +153,23 @@ fun TextInputScreen(
 @Composable
 private fun AiInputSection(
     categories: List<Category>,
+    initialCategoryId: Long? = null,
     onSubmitText: (String) -> Unit,
     onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit
 ) {
     var inputText by remember { mutableStateOf("") }
-    var showManualForm by remember { mutableStateOf(false) }
-    var gridSelectedCategory by remember { mutableStateOf<Category?>(null) }
+    val initialCategory = remember(initialCategoryId, categories) {
+        if (initialCategoryId != null) categories.find { it.id == initialCategoryId } else null
+    }
+    var showManualForm by remember(initialCategory) { mutableStateOf(initialCategory != null) }
+    var gridSelectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    LaunchedEffect(initialCategory) {
+        if (initialCategory == null) {
+            focusRequester.requestFocus()
+        }
     }
 
     // AI text input

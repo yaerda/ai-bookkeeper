@@ -14,8 +14,20 @@ fun NavGraphBuilder.inputNavGraph(navController: NavController) {
     composable(InputRoutes.HOME) {
         HomeScreen(navController = navController)
     }
-    composable(InputRoutes.TEXT_INPUT) {
-        TextInputScreen(navController = navController)
+    composable(
+        route = InputRoutes.TEXT_INPUT,
+        arguments = listOf(
+            navArgument("categoryId") {
+                type = NavType.LongType
+                defaultValue = -1L
+            }
+        )
+    ) { backStackEntry ->
+        val categoryId = backStackEntry.arguments?.getLong("categoryId") ?: -1L
+        TextInputScreen(
+            navController = navController,
+            initialCategoryId = if (categoryId > 0) categoryId else null
+        )
     }
     composable(InputRoutes.BILLS) {
         BillsScreen(navController = navController)
