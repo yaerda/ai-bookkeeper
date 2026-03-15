@@ -54,6 +54,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Undo transaction from success-feedback notification -->
+        <receiver
+            android:name="com.aibookkeeper.feature.capture.notification.UndoTransactionBroadcastReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aibookkeeper.action.UNDO_TRANSACTION" />
+            </intent-filter>
+        </receiver>
+
         <!-- Persistent notification foreground service -->
         <service
             android:name="com.aibookkeeper.feature.capture.notification.PaymentNotificationService"
