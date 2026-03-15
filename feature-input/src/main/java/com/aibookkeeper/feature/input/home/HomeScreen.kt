@@ -185,7 +185,8 @@ fun HomeScreen(
                     ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                     ?.firstOrNull()
                 if (!text.isNullOrBlank()) {
-                    aiInput = text
+                    // 追加到已有内容，用换行分隔（每行一笔账）
+                    aiInput = if (aiInput.isBlank()) text else "${aiInput}\n${text}"
                 }
             }
         }
@@ -210,10 +211,11 @@ fun HomeScreen(
                 OutlinedTextField(
                     value = aiInput,
                     onValueChange = { aiInput = it },
-                    placeholder = { Text("说说你花了什么，如：买芒果28块") },
+                    placeholder = { Text("每行一笔，如：\n买芒果28块\n打车15元") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    maxLines = 3
+                    maxLines = 5,
+                    minLines = 2
                 )
 
                 // Action buttons row: voice, camera, upload
@@ -227,7 +229,11 @@ fun HomeScreen(
                         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...")
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...（每笔账单说一句）")
+                            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
                         }
                         voiceLauncher.launch(intent)
                     }) {

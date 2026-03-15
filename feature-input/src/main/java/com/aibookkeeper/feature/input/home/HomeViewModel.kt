@@ -104,35 +104,52 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _aiStatus.value = AiStatus.Processing
             try {
-                // Pass all category names to AI so it can match custom categories
                 val categories = categoryRepository.observeExpenseCategories().stateIn(viewModelScope).value
                 val categoryNames = categories.map { it.name }
-                val result = aiExtractionRepository.extract(text, categoryNames).getOrThrow()
-                val amount = result.amount ?: 0.0
-                val type = if (result.type == "income") TransactionType.INCOME else TransactionType.EXPENSE
-                val matchedCategory = categories.find { it.name == result.category }
-                val date = try { LocalDate.parse(result.date) } catch (_: Exception) { LocalDate.now() }
 
-                val transaction = Transaction(
-                    amount = amount,
-                    type = type,
-                    categoryId = matchedCategory?.id,
-                    categoryName = matchedCategory?.name ?: result.category,
-                    categoryIcon = matchedCategory?.icon,
-                    categoryColor = matchedCategory?.color,
-                    merchantName = result.merchantName,
-                    note = result.note ?: text,
-                    originalInput = text,
-                    date = date.atStartOfDay(),
-                    createdAt = LocalDateTime.now(),
-                    updatedAt = LocalDateTime.now(),
-                    source = if (result.source == ExtractionSource.AZURE_AI) TransactionSource.TEXT_AI else TransactionSource.MANUAL,
-                    status = TransactionStatus.CONFIRMED,
-                    syncStatus = SyncStatus.LOCAL,
-                    aiConfidence = result.confidence
-                )
-                transactionRepository.create(transaction)
-                _aiStatus.value = AiStatus.Success("${result.category} ${amount}元")
+                // Split multi-line input into separate entries
+                val lines = text.split("\n", "，", "。", "；")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() && it.length > 1 }
+
+                val results = mutableListOf<String>()
+                for (line in lines) {
+                    try {
+                        val result = aiExtractionRepository.extract(line, categoryNames).getOrThrow()
+                        val amount = result.amount ?: continue
+                        if (amount <= 0) continue
+                        val type = if (result.type.equals("income", true)) TransactionType.INCOME else TransactionType.EXPENSE
+                        val matchedCategory = categories.find { it.name == result.category }
+                        val date = try { LocalDate.parse(result.date) } catch (_: Exception) { LocalDate.now() }
+
+                        val transaction = Transaction(
+                            amount = amount,
+                            type = type,
+                            categoryId = matchedCategory?.id,
+                            categoryName = matchedCategory?.name ?: result.category,
+                            categoryIcon = matchedCategory?.icon,
+                            categoryColor = matchedCategory?.color,
+                            merchantName = result.merchantName,
+                            note = result.note ?: line,
+                            originalInput = line,
+                            date = date.atStartOfDay(),
+                            createdAt = LocalDateTime.now(),
+                            updatedAt = LocalDateTime.now(),
+                            source = if (result.source == ExtractionSource.AZURE_AI) TransactionSource.TEXT_AI else TransactionSource.MANUAL,
+                            status = TransactionStatus.CONFIRMED,
+                            syncStatus = SyncStatus.LOCAL,
+                            aiConfidence = result.confidence
+                        )
+                        transactionRepository.create(transaction)
+                        results.add("${result.category} ${amount}元")
+                    } catch (_: Exception) { /* skip failed lines */ }
+                }
+
+                if (results.isNotEmpty()) {
+                    _aiStatus.value = AiStatus.Success("已记${results.size}笔：${results.joinToString("、")}")
+                } else {
+                    _aiStatus.value = AiStatus.Error("未识别到有效账单")
+                }
             } catch (e: Exception) {
                 _aiStatus.value = AiStatus.Error(e.message ?: "识别失败")
             }
