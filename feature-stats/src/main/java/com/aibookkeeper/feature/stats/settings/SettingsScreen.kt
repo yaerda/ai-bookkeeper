@@ -18,10 +18,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -137,6 +140,84 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // ── Azure OpenAI section ─────────────────────────────────
+            Text(
+                text = "AI 设置",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Azure OpenAI 配置",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+
+            Text(
+                text = "配置后支持自然语言智能记账，不配置则使用本地规则解析",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            OutlinedTextField(
+                value = uiState.azureEndpoint,
+                onValueChange = { viewModel.setAzureEndpoint(it) },
+                label = { Text("Endpoint") },
+                placeholder = { Text("https://xxx.openai.azure.com/") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            OutlinedTextField(
+                value = uiState.azureApiKey,
+                onValueChange = { viewModel.setAzureApiKey(it) },
+                label = { Text("API Key") },
+                placeholder = { Text("输入你的 Azure OpenAI Key") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            OutlinedTextField(
+                value = uiState.azureDeployment,
+                onValueChange = { viewModel.setAzureDeployment(it) },
+                label = { Text("Deployment") },
+                placeholder = { Text("gpt-4.1-mini") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = if (uiState.azureApiKey.isNotBlank() && uiState.azureEndpoint.isNotBlank())
+                    "✅ AI 已配置" else "⚠️ 未配置 — 将使用本地规则解析",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (uiState.azureApiKey.isNotBlank() && uiState.azureEndpoint.isNotBlank())
+                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

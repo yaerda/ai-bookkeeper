@@ -19,6 +19,8 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    private val prefs = context.getSharedPreferences("azure_openai", Context.MODE_PRIVATE)
+
     init {
         refreshState()
     }
@@ -28,7 +30,10 @@ class SettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isPermissionGranted = NotificationPermissionHelper.isPermissionGranted(context),
-                isNotificationEnabled = NotificationPermissionHelper.isNotificationEnabled(context)
+                isNotificationEnabled = NotificationPermissionHelper.isNotificationEnabled(context),
+                azureEndpoint = prefs.getString("endpoint", "") ?: "",
+                azureApiKey = prefs.getString("api_key", "") ?: "",
+                azureDeployment = prefs.getString("deployment", "gpt-4.1-mini") ?: "gpt-4.1-mini"
             )
         }
     }
@@ -47,9 +52,27 @@ class SettingsViewModel @Inject constructor(
             setNotificationEnabled(true)
         }
     }
+
+    fun setAzureEndpoint(value: String) {
+        prefs.edit().putString("endpoint", value).apply()
+        _uiState.update { it.copy(azureEndpoint = value) }
+    }
+
+    fun setAzureApiKey(value: String) {
+        prefs.edit().putString("api_key", value).apply()
+        _uiState.update { it.copy(azureApiKey = value) }
+    }
+
+    fun setAzureDeployment(value: String) {
+        prefs.edit().putString("deployment", value).apply()
+        _uiState.update { it.copy(azureDeployment = value) }
+    }
 }
 
 data class SettingsUiState(
     val isPermissionGranted: Boolean = false,
-    val isNotificationEnabled: Boolean = false
+    val isNotificationEnabled: Boolean = false,
+    val azureEndpoint: String = "",
+    val azureApiKey: String = "",
+    val azureDeployment: String = "gpt-4.1-mini"
 )
