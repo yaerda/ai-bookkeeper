@@ -7,3 +7,8 @@ build/
 .idea/
 *.iml
 local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
