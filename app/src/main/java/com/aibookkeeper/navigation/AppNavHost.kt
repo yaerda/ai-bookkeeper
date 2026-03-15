@@ -95,19 +95,12 @@ fun AppNavHost() {
 
                     bottomNavItems.forEach { item ->
                         if (item is BottomNavItem.Add) {
-                            // Prominent center button
+                            // Prominent center button — FAB is purely visual;
+                            // NavigationBarItem onClick handles navigation.
                             NavigationBarItem(
                                 icon = {
                                     FloatingActionButton(
-                                        onClick = {
-                                            navController.navigate(item.navigateRoute) {
-                                                popUpTo(navController.graph.findStartDestination().id) {
-                                                    saveState = true
-                                                }
-                                                launchSingleTop = true
-                                                restoreState = true
-                                            }
-                                        },
+                                        onClick = {},
                                         modifier = Modifier
                                             .size(48.dp)
                                             .offset(y = (-4).dp),
