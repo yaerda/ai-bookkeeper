@@ -224,38 +224,6 @@ private fun AiInputSection(
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    // Quick examples
-    Text(
-        text = "💡 试试这样说",
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
-
-    val examples = listOf(
-        "午饭花了35元",
-        "打车到公司15",
-        "收到工资8000",
-        "星巴克拿铁28",
-        "买了件衣服299"
-    )
-
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        examples.forEach { example ->
-            FilterChip(
-                selected = false,
-                onClick = { inputText = example },
-                label = { Text(example, style = MaterialTheme.typography.bodySmall) }
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(24.dp))
-
     // Quick category grid
     Text(
         text = "🏷️ 快速分类",
