@@ -82,11 +82,6 @@ fun TextInputScreen(
     val focusManager = LocalFocusManager.current
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("记账") }
-            )
-        },
         modifier = modifier
     ) { innerPadding ->
         Column(
