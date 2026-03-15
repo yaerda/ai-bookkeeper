@@ -340,10 +340,32 @@ private fun TransactionDetailContent(
                     ) {
                         categories.forEach { cat ->
                             val emoji = CategoryIconMapper.getEmoji(cat.icon)
+                            val isSelected = editCategoryId == cat.id
                             FilterChip(
-                                selected = editCategoryId == cat.id,
+                                selected = isSelected,
                                 onClick = { editCategoryId = cat.id; editCategoryName = cat.name },
-                                label = { Text("$emoji ${cat.name}") }
+                                label = {
+                                    Text(
+                                        "$emoji ${cat.name}",
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = if (isSelected) {
+                                    { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                border = if (isSelected) {
+                                    androidx.compose.material3.FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = true,
+                                        borderColor = MaterialTheme.colorScheme.primary,
+                                        borderWidth = 2.dp
+                                    )
+                                } else {
+                                    androidx.compose.material3.FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = false
+                                    )
+                                }
                             )
                         }
                     }
