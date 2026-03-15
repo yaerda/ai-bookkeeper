@@ -227,7 +227,8 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(onClick = {
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        val ctx = navController.context
+                        val baseIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
                             putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...（每笔账单说一句）")
@@ -236,10 +237,46 @@ fun HomeScreen(
                             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
                         }
-                        if (intent.resolveActivity(navController.context.packageManager) != null) {
-                            voiceLauncher.launch(intent)
+                        // 各品牌预装语音引擎（按优先级尝试）
+                        // Google: 所有装了 GMS 的设备
+                        // 讯飞: OPPO/一加/vivo/部分华为
+                        // 百度: 小米/红米
+                        // 搜狗: 部分 OPPO/一加
+                        // 三星: Samsung Bixby
+                        val speechPackages = listOf(
+                            "com.google.android.googlequicksearchbox",  // Google（最通用）
+                            "com.iflytek.speechsuite",                 // 讯飞（OPPO/一加/vivo）
+                            "com.baidu.input",                         // 百度（小米/红米）
+                            "com.baidu.input_oppo",                    // 百度 OPPO 定制版
+                            "com.sohu.inputmethod.sogouoem",           // 搜狗（部分 OEM）
+                            "com.samsung.android.bixby.agent",         // 三星 Bixby
+                            "com.huawei.vassistant",                   // 华为小艺
+                        )
+                        val pm = ctx.packageManager
+                        // 先尝试默认
+                        if (baseIntent.resolveActivity(pm) != null) {
+                            voiceLauncher.launch(baseIntent)
                         } else {
-                            Toast.makeText(navController.context, "🎙 未安装语音识别服务，请安装 Google 语音", Toast.LENGTH_LONG).show()
+                            // 逐个尝试已安装的语音包
+                            val launched = speechPackages.any { pkg ->
+                                try {
+                                    pm.getPackageInfo(pkg, 0)
+                                    baseIntent.setPackage(pkg)
+                                    if (baseIntent.resolveActivity(pm) != null) {
+                                        voiceLauncher.launch(baseIntent)
+                                        true
+                                    } else {
+                                        baseIntent.setPackage(null)
+                                        false
+                                    }
+                                } catch (_: Exception) {
+                                    baseIntent.setPackage(null)
+                                    false
+                                }
+                            }
+                            if (!launched) {
+                                Toast.makeText(ctx, "🎙 未找到语音识别服务\n请安装 Google 应用或讯飞语音", Toast.LENGTH_LONG).show()
+                            }
                         }
                     }) {
                         Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
