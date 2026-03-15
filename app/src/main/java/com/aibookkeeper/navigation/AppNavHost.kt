@@ -16,16 +16,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
 import com.aibookkeeper.feature.input.navigation.InputRoutes
 import com.aibookkeeper.feature.input.navigation.inputNavGraph
 import com.aibookkeeper.feature.capture.navigation.captureNavGraph
+import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
+import com.aibookkeeper.onboarding.OnboardingScreen
+
+private const val ROUTE_ONBOARDING = "onboarding"
 
 sealed class BottomNavItem(
     val route: String,
@@ -42,6 +48,14 @@ sealed class BottomNavItem(
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
+    val context = LocalContext.current
+
+    val startDestination = if (NotificationPermissionHelper.isOnboardingCompleted(context)) {
+        InputRoutes.HOME
+    } else {
+        ROUTE_ONBOARDING
+    }
+
     val bottomNavItems = listOf(
         BottomNavItem.Home,
         BottomNavItem.Stats,
@@ -52,37 +66,68 @@ fun AppNavHost() {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentRoute = navBackStackEntry?.destination?.route
 
-                bottomNavItems.forEach { item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label) },
-                        selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
-                        onClick = {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+            // Hide bottom bar on onboarding screen
+            if (currentRoute != ROUTE_ONBOARDING) {
+                NavigationBar {
+                    val currentDestination = navBackStackEntry?.destination
+
+                    bottomNavItems.forEach { item ->
+                        NavigationBarItem(
+                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            label = { Text(item.label) },
+                            selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                            onClick = {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = InputRoutes.HOME,
+            startDestination = startDestination,
             modifier = Modifier.padding(innerPadding)
         ) {
+            // Onboarding (first launch only)
+            composable(ROUTE_ONBOARDING) {
+                OnboardingScreen(
+                    onComplete = {
+                        // Start service if permission was granted
+                        if (NotificationPermissionHelper.isPermissionGranted(context) &&
+                            NotificationPermissionHelper.isNotificationEnabled(context)
+                        ) {
+                            PaymentNotificationService.start(context)
+                        }
+                        navController.navigate(InputRoutes.HOME) {
+                            popUpTo(ROUTE_ONBOARDING) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
             inputNavGraph(navController)
             captureNavGraph(navController)
-            statsNavGraph(navController)
+            statsNavGraph(
+                navController = navController,
+                onNotificationServiceToggle = { enabled ->
+                    if (enabled) {
+                        PaymentNotificationService.start(context)
+                    } else {
+                        PaymentNotificationService.stop(context)
+                    }
+                }
+            )
         }
     }
 }
