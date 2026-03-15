@@ -1,16 +1,12 @@
 package com.aibookkeeper.navigation
 
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -96,61 +92,21 @@ fun AppNavHost() {
                     val currentDestination = navBackStackEntry?.destination
 
                     bottomNavItems.forEach { item ->
-                        if (item is BottomNavItem.Add) {
-                            NavigationBarItem(
-                                icon = {
-                                    FloatingActionButton(
-                                        onClick = {
-                                            navController.navigate(item.navigateRoute) {
-                                                popUpTo(navController.graph.findStartDestination().id) {
-                                                    saveState = true
-                                                }
-                                                launchSingleTop = true
-                                                restoreState = false
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .offset(y = (-4).dp),
-                                        elevation = FloatingActionButtonDefaults.elevation(
-                                            defaultElevation = 4.dp
-                                        )
-                                    ) {
-                                        Icon(
-                                            item.icon,
-                                            contentDescription = item.label,
-                                            modifier = Modifier.size(28.dp)
-                                        )
+                        NavigationBarItem(
+                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            label = { Text(item.label) },
+                            selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                                    || (item is BottomNavItem.Add && currentRoute == "manual_input"),
+                            onClick = {
+                                navController.navigate(item.navigateRoute) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
                                     }
-                                },
-                                label = { Text(item.label) },
-                                selected = currentRoute == "manual_input",
-                                onClick = {
-                                    navController.navigate(item.navigateRoute) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = false
-                                    }
+                                    launchSingleTop = true
+                                    restoreState = item !is BottomNavItem.Add
                                 }
-                            )
-                        } else {
-                            NavigationBarItem(
-                                icon = { Icon(item.icon, contentDescription = item.label) },
-                                label = { Text(item.label) },
-                                selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
-                                onClick = {
-                                    navController.navigate(item.navigateRoute) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                }
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
