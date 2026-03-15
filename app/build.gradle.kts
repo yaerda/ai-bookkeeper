@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -23,7 +25,8 @@ android {
         // Azure OpenAI config from local.properties
         val properties = project.rootProject.file("local.properties")
         if (properties.exists()) {
-            val localProps = java.util.Properties().apply { load(properties.inputStream()) }
+            val localProps = Properties()
+            properties.inputStream().use { localProps.load(it) }
             buildConfigField("String", "AZURE_OPENAI_API_KEY",
                 "\"${localProps.getProperty("AZURE_OPENAI_API_KEY", "")}\"")
             buildConfigField("String", "AZURE_OPENAI_ENDPOINT",
