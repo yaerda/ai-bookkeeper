@@ -259,12 +259,12 @@ private fun TransactionDetailContent(
 
                 if (!transaction.merchantName.isNullOrBlank()) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "商户", value = transaction.merchantName)
+                    DetailRow(label = "商户", value = transaction.merchantName.orEmpty())
                 }
 
                 if (!transaction.note.isNullOrBlank()) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "备注", value = transaction.note)
+                    DetailRow(label = "备注", value = transaction.note.orEmpty())
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -274,13 +274,13 @@ private fun TransactionDetailContent(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     DetailRow(
                         label = "AI 置信度",
-                        value = "${"%.0f".format(transaction.aiConfidence * 100)}%"
+                        value = "${"%.0f".format((transaction.aiConfidence ?: 0f) * 100)}%"
                     )
                 }
 
                 if (!transaction.originalInput.isNullOrBlank()) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    DetailRow(label = "原始输入", value = transaction.originalInput)
+                    DetailRow(label = "原始输入", value = transaction.originalInput.orEmpty())
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

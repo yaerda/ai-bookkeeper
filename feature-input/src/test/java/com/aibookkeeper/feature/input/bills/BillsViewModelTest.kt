@@ -273,4 +273,38 @@ class BillsViewModelTest {
             coVerify { transactionRepository.delete(42L) }
         }
     }
+
+    // ── Undo delete ──────────────────────────────────────────────────────
+
+    @Nested
+    inner class UndoDelete {
+
+        @Test
+        fun should_callRepositoryCreate_when_undoDeleteCalled() = runTest {
+            val tx = createTransaction(id = 7, amount = 42.0)
+            coEvery { transactionRepository.create(any()) } returns Result.success(7L)
+            val vm = createViewModel()
+
+            vm.undoDelete(tx)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify { transactionRepository.create(tx) }
+        }
+
+        @Test
+        fun should_passCorrectTransaction_when_undoDeleteCalled() = runTest {
+            val tx = createTransaction(id = 99, amount = 128.5)
+            coEvery { transactionRepository.create(any()) } returns Result.success(99L)
+            val vm = createViewModel()
+
+            vm.undoDelete(tx)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                transactionRepository.create(match {
+                    it.id == 99L && it.amount == 128.5
+                })
+            }
+        }
+    }
 }
