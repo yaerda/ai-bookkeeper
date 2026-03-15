@@ -148,6 +148,7 @@ class TransactionRepositoryImplTest {
                 transactionDao.observeByDateRange(any(), any())
             } returns flowOf(listOf(sampleEntity))
             every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
 
             val result = repository.observeByMonth(java.time.YearMonth.of(2026, 3)).first()
 
@@ -164,6 +165,37 @@ class TransactionRepositoryImplTest {
             val result = repository.observeByMonth(java.time.YearMonth.of(2026, 3)).first()
 
             assertTrue(result.isEmpty())
+        }
+
+        @Test
+        fun should_enrichCategoryInfo_when_observingByMonth() = runTest {
+            every {
+                transactionDao.observeByDateRange(any(), any())
+            } returns flowOf(listOf(sampleEntity))
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } returns sampleCategory
+
+            val result = repository.observeByMonth(java.time.YearMonth.of(2026, 3)).first()
+
+            assertEquals(1, result.size)
+            assertEquals("餐饮", result[0].categoryName)
+            assertEquals("ic_food", result[0].categoryIcon)
+            assertEquals("#FF5722", result[0].categoryColor)
+        }
+
+        @Test
+        fun should_returnNullCategoryName_when_categoryIdIsNull() = runTest {
+            val entityNoCat = sampleEntity.copy(categoryId = null)
+            val domainNoCat = sampleDomain.copy(categoryId = null)
+            every {
+                transactionDao.observeByDateRange(any(), any())
+            } returns flowOf(listOf(entityNoCat))
+            every { mapper.toDomain(entityNoCat) } returns domainNoCat
+
+            val result = repository.observeByMonth(java.time.YearMonth.of(2026, 3)).first()
+
+            assertEquals(1, result.size)
+            assertNull(result[0].categoryName)
         }
     }
 

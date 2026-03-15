@@ -37,24 +37,40 @@ class TransactionRepositoryImpl @Inject constructor(
         }
 
     override fun observeById(id: Long): Flow<Transaction?> =
-        transactionDao.observeById(id).map { it?.let(mapper::toDomain) }
+        transactionDao.observeById(id).map { entity ->
+            entity?.let { enrichWithCategory(mapper.toDomain(it)) }
+        }
 
     override fun observeByDateRange(start: LocalDateTime, end: LocalDateTime): Flow<List<Transaction>> =
         transactionDao.observeByDateRange(start.toEpochMillis(), end.toEpochMillis())
-            .map { entities -> entities.map(mapper::toDomain) }
+            .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observeByMonth(yearMonth: YearMonth): Flow<List<Transaction>> =
         transactionDao.observeByDateRange(yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis())
-            .map { entities -> entities.map(mapper::toDomain) }
+            .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observePendingTransactions(): Flow<List<Transaction>> =
         transactionDao.observeByStatus(TransactionStatus.PENDING.name)
-            .map { entities -> entities.map(mapper::toDomain) }
+            .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observeByCategoryAndMonth(categoryId: Long, yearMonth: YearMonth): Flow<List<Transaction>> =
         transactionDao.observeByCategoryAndDateRange(
             categoryId, yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis()
-        ).map { entities -> entities.map(mapper::toDomain) }
+        ).map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
+
+    /**
+     * Resolves category name/icon/color from the categories table
+     * for a mapped Transaction whose categoryId is set.
+     */
+    private suspend fun enrichWithCategory(transaction: Transaction): Transaction {
+        val category = transaction.categoryId?.let { categoryDao.getById(it) }
+            ?: return transaction
+        return transaction.copy(
+            categoryName = category.name,
+            categoryIcon = category.icon,
+            categoryColor = category.color
+        )
+    }
 
     override suspend fun update(transaction: Transaction): Result<Unit> = runCatching {
         transactionDao.update(mapper.toEntity(transaction))
@@ -75,7 +91,7 @@ class TransactionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun search(keyword: String): List<Transaction> =
-        transactionDao.search(keyword).map(mapper::toDomain)
+        transactionDao.search(keyword).map { enrichWithCategory(mapper.toDomain(it)) }
 
     override fun observeMonthlyIncome(yearMonth: YearMonth): Flow<Double> =
         transactionDao.observeSumByTypeAndDateRange(
@@ -105,7 +121,7 @@ class TransactionRepositoryImpl @Inject constructor(
         }
 
     override suspend fun getPendingSync(): List<Transaction> =
-        transactionDao.getPendingSyncTransactions().map(mapper::toDomain)
+        transactionDao.getPendingSyncTransactions().map { enrichWithCategory(mapper.toDomain(it)) }
 
     override suspend fun markSynced(ids: List<Long>) {
         ids.forEach { transactionDao.updateSyncStatus(it, SyncStatus.SYNCED.name) }

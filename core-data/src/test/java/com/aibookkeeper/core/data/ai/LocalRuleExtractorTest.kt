@@ -282,6 +282,28 @@ class LocalRuleExtractorTest {
     }
 
     @Test
+    fun should_categorizeAsFood_when_inputContainsFoodItemKeyword() = runTest {
+        val inputs = mapOf(
+            "买芒果28块" to "餐饮",
+            "买苹果10元" to "餐饮",
+            "买牛奶15" to "餐饮",
+            "买水果50" to "餐饮",
+            "买鸡蛋12" to "餐饮",
+            "买面包8" to "餐饮",
+            "买猪肉35" to "餐饮",
+            "买了点零食20" to "餐饮",
+            "购蔬菜25" to "餐饮",
+            "买饮料6" to "餐饮",
+            "买西瓜30" to "餐饮",
+            "买了一箱啤酒60" to "餐饮",
+        )
+        for ((input, expected) in inputs) {
+            val result = extractor.extract(input).getOrThrow()
+            assertEquals(expected, result.category, "Failed for input: '$input' — expected '$expected' but got '${result.category}'")
+        }
+    }
+
+    @Test
     fun should_prioritizeSpecificCategory_when_multipleOverlappingKeywords() = runTest {
         // "买药" contains both 买(购物) and 药(医疗) — should pick 医疗
         assertEquals("医疗", extractor.extract("买药").getOrThrow().category)

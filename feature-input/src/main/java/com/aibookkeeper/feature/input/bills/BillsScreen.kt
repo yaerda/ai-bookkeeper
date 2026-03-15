@@ -23,12 +23,17 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -36,6 +41,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +59,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
+import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
@@ -63,11 +71,14 @@ fun BillsScreen(
     viewModel: BillsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("账单") })
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = modifier
     ) { innerPadding ->
         Column(
@@ -119,8 +130,25 @@ fun BillsScreen(
 
             HorizontalDivider()
 
-            if (uiState.dayGroups.isEmpty() && !uiState.isLoading) {
-                // Empty state
+            if (uiState.isLoading) {
+                // Loading state
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(40.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "加载中...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else if (uiState.dayGroups.isEmpty()) {
                 EmptyBillsState()
             } else {
                 LazyColumn(
@@ -132,13 +160,26 @@ fun BillsScreen(
                             DayHeader(dayGroup = dayGroup)
                         }
 
-                        // Transactions for this day
+                        // Transactions with swipe-to-delete
                         items(
                             items = dayGroup.transactions,
                             key = { it.id }
                         ) { transaction ->
-                            TransactionItem(
+                            SwipeToDeleteTransactionItem(
                                 transaction = transaction,
+                                onDelete = { tx ->
+                                    viewModel.deleteTransaction(tx.id)
+                                    scope.launch {
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "已删除 ${tx.categoryName ?: ""}",
+                                            actionLabel = "撤销",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            viewModel.undoDelete(tx)
+                                        }
+                                    }
+                                },
                                 onClick = {
                                     navController.navigate("transaction/${transaction.id}")
                                 }
@@ -231,12 +272,60 @@ private fun DayHeader(dayGroup: DayGroup) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDeleteTransactionItem(
+    transaction: Transaction,
+    onDelete: (Transaction) -> Unit,
+    onClick: () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete(transaction)
+                true
+            } else {
+                false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        },
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true
+    ) {
+        TransactionItem(
+            transaction = transaction,
+            onClick = onClick
+        )
+    }
+}
+
 @Composable
 private fun TransactionItem(
     transaction: Transaction,
     onClick: () -> Unit
 ) {
-    Row(
+    Column(
+        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
@@ -282,6 +371,7 @@ private fun TransactionItem(
         )
     }
     HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
+    }
 }
 
 @Composable

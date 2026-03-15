@@ -6,6 +6,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.aibookkeeper.feature.input.bills.BillsScreen
+import com.aibookkeeper.feature.input.detail.TransactionDetailScreen
 import com.aibookkeeper.feature.input.home.HomeScreen
 import com.aibookkeeper.feature.input.text.TextInputScreen
 
@@ -23,6 +24,6 @@ fun NavGraphBuilder.inputNavGraph(navController: NavController) {
         route = InputRoutes.DETAIL,
         arguments = listOf(navArgument("transactionId") { type = NavType.LongType })
     ) {
-        // TODO: TransactionDetailScreen
+        TransactionDetailScreen(navController = navController)
     }
 }

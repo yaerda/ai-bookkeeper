@@ -97,4 +97,10 @@ class BillsViewModel @Inject constructor(
             transactionRepository.delete(id)
         }
     }
+
+    fun undoDelete(transaction: Transaction) {
+        viewModelScope.launch {
+            transactionRepository.create(transaction)
+        }
+    }
 }

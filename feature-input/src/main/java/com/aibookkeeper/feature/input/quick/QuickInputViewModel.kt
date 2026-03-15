@@ -155,13 +155,13 @@ class QuickInputViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = QuickInputUiState.Saving
             val now = LocalDateTime.now()
-            val category = categoryRepository.findByNameAndType(
-                extraction.category, TransactionType.EXPENSE
-            )
             val txType = when (extraction.type.uppercase()) {
                 "INCOME" -> TransactionType.INCOME
                 else -> TransactionType.EXPENSE
             }
+            val category = categoryRepository.findByNameAndType(
+                extraction.category, txType
+            )
             val txDate = try {
                 LocalDate.parse(extraction.date).atStartOfDay()
             } catch (_: Exception) {
