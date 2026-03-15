@@ -413,27 +413,15 @@ private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit 
                 text = transaction.categoryName ?: "未分类",
                 style = MaterialTheme.typography.bodyLarge
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val noteText = transaction.note
-                if (!noteText.isNullOrBlank()) {
-                    Text(
-                        text = noteText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = " · ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = transaction.date.format(DateTimeFormatter.ofPattern("M/d")),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            val noteText = transaction.note
+            val dateText = transaction.date.format(DateTimeFormatter.ofPattern("M/d"))
+            val subtitle = if (!noteText.isNullOrBlank()) "$noteText · $dateText" else dateText
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
 
         Text(
