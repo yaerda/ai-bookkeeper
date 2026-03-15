@@ -25,6 +25,13 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import javax.inject.Inject
 
+private data class DataTuple(
+    val monthExpense: Double,
+    val monthIncome: Double,
+    val transactions: List<Transaction>,
+    val categories: List<Category>
+)
+
 data class HomeUiState(
     val todayExpense: Double = 0.0,
     val todayIncome: Double = 0.0,
@@ -56,15 +63,19 @@ class HomeViewModel @Inject constructor(
     private val currentMonth = YearMonth.now()
 
     val uiState: StateFlow<HomeUiState> = combine(
-        transactionRepository.observeMonthlyExpense(currentMonth),
-        transactionRepository.observeMonthlyIncome(currentMonth),
-        transactionRepository.observeByMonth(currentMonth),
-        categoryRepository.observeExpenseCategories(),
+        combine(
+            transactionRepository.observeMonthlyExpense(currentMonth),
+            transactionRepository.observeMonthlyIncome(currentMonth),
+            transactionRepository.observeByMonth(currentMonth),
+            categoryRepository.observeExpenseCategories()
+        ) { monthExpense, monthIncome, transactions, categories ->
+            DataTuple(monthExpense, monthIncome, transactions, categories)
+        },
         _aiStatus
-    ) { monthExpense, monthIncome, transactions, categories, aiStatus ->
+    ) { data, aiStatus ->
 
         val today = LocalDate.now()
-        val todayTransactions = transactions.filter { it.date.toLocalDate() == today }
+        val todayTransactions = data.transactions.filter { it.date.toLocalDate() == today }
         val todayExpense = todayTransactions
             .filter { it.type == TransactionType.EXPENSE }
             .sumOf { it.amount }
@@ -75,10 +86,10 @@ class HomeViewModel @Inject constructor(
         HomeUiState(
             todayExpense = todayExpense,
             todayIncome = todayIncome,
-            monthExpense = monthExpense,
-            monthIncome = monthIncome,
-            recentTransactions = transactions.take(20),
-            expenseCategories = categories,
+            monthExpense = data.monthExpense,
+            monthIncome = data.monthIncome,
+            recentTransactions = data.transactions.take(20),
+            expenseCategories = data.categories,
             currentMonth = currentMonth,
             isLoading = false,
             aiStatus = aiStatus
