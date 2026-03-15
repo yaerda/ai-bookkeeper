@@ -219,6 +219,17 @@ fun SettingsScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Version info
+            Text(
+                text = "v1.0.1",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         }
     }
 }
