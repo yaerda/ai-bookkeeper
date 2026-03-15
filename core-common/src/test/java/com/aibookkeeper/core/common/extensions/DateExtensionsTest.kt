@@ -3,6 +3,7 @@ package com.aibookkeeper.core.common.extensions
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.ZoneId
@@ -10,6 +11,90 @@ import java.time.ZoneId
 class DateExtensionsTest {
 
     private val zone = ZoneId.systemDefault()
+
+    // ── Friendly date formatting ─────────────────────────────────────────
+
+    @Nested
+    inner class FriendlyDateFormatting {
+
+        @Test
+        fun should_formatWithoutLeadingZero_when_singleDigitMonthAndDay() {
+            val date = LocalDate.of(2026, 3, 5)
+            assertEquals("3月5日 周四", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_showCorrectWeekday_when_saturday() {
+            val date = LocalDate.of(2026, 3, 14)
+            assertEquals("3月14日 周六", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_showCorrectWeekday_when_sunday() {
+            val date = LocalDate.of(2026, 3, 15)
+            assertEquals("3月15日 周日", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_showCorrectWeekday_when_monday() {
+            val date = LocalDate.of(2026, 3, 16)
+            assertEquals("3月16日 周一", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_handleDecember31_when_endOfYear() {
+            val date = LocalDate.of(2026, 12, 31)
+            assertEquals("12月31日 周四", date.toFriendlyDateString())
+        }
+
+        @Test
+        fun should_handleJanuary1_when_startOfYear() {
+            val date = LocalDate.of(2026, 1, 1)
+            assertEquals("1月1日 周四", date.toFriendlyDateString())
+        }
+    }
+
+    // ── Friendly date-time formatting ────────────────────────────────────
+
+    @Nested
+    inner class FriendlyDateTimeFormatting {
+
+        @Test
+        fun should_includeDateAndTime_when_dateTimeGiven() {
+            val dt = LocalDateTime.of(2026, 3, 14, 14, 30)
+            assertEquals("3月14日 周六 14:30", dt.toFriendlyDateTimeString())
+        }
+
+        @Test
+        fun should_padHourAndMinute_when_singleDigit() {
+            val dt = LocalDateTime.of(2026, 3, 14, 8, 5)
+            assertEquals("3月14日 周六 08:05", dt.toFriendlyDateTimeString())
+        }
+
+        @Test
+        fun should_showMidnight_when_startOfDay() {
+            val dt = LocalDateTime.of(2026, 3, 14, 0, 0)
+            assertEquals("3月14日 周六 00:00", dt.toFriendlyDateTimeString())
+        }
+    }
+
+    // ── Friendly full date-time formatting ───────────────────────────────
+
+    @Nested
+    inner class FriendlyFullDateTimeFormatting {
+
+        @Test
+        fun should_includeYearAndSeconds_when_fullDateTimeGiven() {
+            val dt = LocalDateTime.of(2026, 3, 14, 14, 30, 45)
+            assertEquals("2026年3月14日 14:30:45", dt.toFriendlyFullDateTimeString())
+        }
+
+        @Test
+        fun should_padTimeComponents_when_singleDigit() {
+            val dt = LocalDateTime.of(2026, 1, 2, 3, 4, 5)
+            assertEquals("2026年1月2日 03:04:05", dt.toFriendlyFullDateTimeString())
+        }
+    }
 
     // ── LocalDateTime.toEpochMillis / Long.toLocalDateTime ────────────────
 

@@ -50,12 +50,13 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.aibookkeeper.core.common.extensions.toFriendlyDateTimeString
+import com.aibookkeeper.core.common.extensions.toFriendlyFullDateTimeString
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -254,7 +255,7 @@ private fun TransactionDetailContent(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 DetailRow(
                     label = "时间",
-                    value = transaction.date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                    value = transaction.date.toFriendlyDateTimeString()
                 )
 
                 if (!transaction.merchantName.isNullOrBlank()) {
@@ -286,7 +287,7 @@ private fun TransactionDetailContent(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 DetailRow(
                     label = "创建时间",
-                    value = transaction.createdAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    value = transaction.createdAt.toFriendlyFullDateTimeString()
                 )
             }
         }

@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -78,6 +79,7 @@ fun TextInputScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val focusManager = LocalFocusManager.current
 
     Scaffold(
         topBar = {
@@ -98,6 +100,10 @@ fun TextInputScreen(
                 .padding(innerPadding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
+                .clickable(
+                    interactionSource = null,
+                    indication = null
+                ) { focusManager.clearFocus() }
                 .padding(16.dp)
         ) {
             when (uiState) {
@@ -269,7 +275,8 @@ private fun AiInputSection(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         maxItemsInEachRow = 4
     ) {
-        categories.take(8).forEach { cat ->
+        val visibleCategories = categories.take(8)
+        visibleCategories.forEach { cat ->
             CategoryGridItem(
                 category = cat,
                 onClick = {
@@ -278,6 +285,13 @@ private fun AiInputSection(
                 },
                 modifier = Modifier.weight(1f)
             )
+        }
+        // Fill remaining slots so last row items stay same width as others
+        val remainder = visibleCategories.size % 4
+        if (remainder != 0) {
+            repeat(4 - remainder) {
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 

@@ -14,9 +14,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 data class DayGroup(
@@ -59,7 +59,7 @@ class BillsViewModel @Inject constructor(
                     val label = when (date) {
                         today -> "今天"
                         yesterday -> "昨天"
-                        else -> date.format(DateTimeFormatter.ofPattern("MM月dd日 E"))
+                        else -> date.toFriendlyDateString()
                     }
                     DayGroup(
                         date = date,

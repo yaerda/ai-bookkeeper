@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,9 +51,9 @@ import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.navigation.InputRoutes
+import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,9 +75,7 @@ fun HomeScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = LocalDate.now().format(
-                                DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.CHINESE)
-                            ),
+                            text = LocalDate.now().toFriendlyDateString(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -92,7 +91,8 @@ fun HomeScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(bottom = 88.dp)
             ) {
             // Summary cards
             item {
@@ -309,12 +309,20 @@ private fun QuickCategorySection(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             maxItemsInEachRow = 4
         ) {
-            categories.take(8).forEach { category ->
+            val visibleCategories = categories.take(8)
+            visibleCategories.forEach { category ->
                 CategoryChip(
                     category = category,
                     onClick = { onCategoryClick(category) },
                     modifier = Modifier.weight(1f)
                 )
+            }
+            // Fill remaining slots so last row items stay same width as others
+            val remainder = visibleCategories.size % 4
+            if (remainder != 0) {
+                repeat(4 - remainder) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
             }
         }
     }
