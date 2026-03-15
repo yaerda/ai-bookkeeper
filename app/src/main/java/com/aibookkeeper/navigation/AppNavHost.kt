@@ -41,7 +41,7 @@ sealed class BottomNavItem(
     data object Home : BottomNavItem(InputRoutes.HOME, Icons.Default.Home, "首页")
     data object Stats : BottomNavItem("stats", Icons.Default.BarChart, "统计")
     data object Add : BottomNavItem(InputRoutes.TEXT_INPUT, Icons.Default.Add, "记账")
-    data object Bills : BottomNavItem("bills", Icons.Default.Receipt, "账单")
+    data object Bills : BottomNavItem(InputRoutes.BILLS, Icons.Default.Receipt, "账单")
     data object Settings : BottomNavItem("settings", Icons.Default.Settings, "设置")
 }
 
