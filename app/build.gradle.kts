@@ -33,10 +33,13 @@ android {
                 "\"${localProps.getProperty("AZURE_OPENAI_ENDPOINT", "")}\"")
             buildConfigField("String", "AZURE_OPENAI_DEPLOYMENT",
                 "\"${localProps.getProperty("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")}\"")
+            buildConfigField("String", "AZURE_OPENAI_SPEECH_DEPLOYMENT",
+                "\"${localProps.getProperty("AZURE_OPENAI_SPEECH_DEPLOYMENT", "")}\"")
         } else {
             buildConfigField("String", "AZURE_OPENAI_API_KEY", "\"\"")
             buildConfigField("String", "AZURE_OPENAI_ENDPOINT", "\"\"")
             buildConfigField("String", "AZURE_OPENAI_DEPLOYMENT", "\"gpt-4.1-mini\"")
+            buildConfigField("String", "AZURE_OPENAI_SPEECH_DEPLOYMENT", "\"\"")
         }
     }
 

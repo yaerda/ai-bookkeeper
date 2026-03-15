@@ -7,8 +7,10 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.SyncStatus
+import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,8 @@ class HomeViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val aiExtractionRepository: AiExtractionRepository = mockk(relaxed = true)
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
 
     private val now = LocalDateTime.now()
     private val currentMonth = YearMonth.now()
@@ -58,7 +62,12 @@ class HomeViewModelTest {
         every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
         every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
 
-        return HomeViewModel(transactionRepository, categoryRepository)
+        return HomeViewModel(
+            transactionRepository,
+            categoryRepository,
+            aiExtractionRepository,
+            voiceTranscriptionRepository
+        )
     }
 
     private fun createTransaction(

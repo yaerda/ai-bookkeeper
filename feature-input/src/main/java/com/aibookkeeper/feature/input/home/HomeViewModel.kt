@@ -12,6 +12,7 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,7 +42,8 @@ data class HomeUiState(
     val expenseCategories: List<Category> = emptyList(),
     val currentMonth: YearMonth = YearMonth.now(),
     val isLoading: Boolean = true,
-    val aiStatus: AiStatus = AiStatus.Idle
+    val aiStatus: AiStatus = AiStatus.Idle,
+    val voiceStatus: VoiceStatus = VoiceStatus.Idle
 )
 
 sealed class AiStatus {
@@ -51,14 +53,23 @@ sealed class AiStatus {
     data class Error(val message: String) : AiStatus()
 }
 
+sealed class VoiceStatus {
+    data object Idle : VoiceStatus()
+    data object Processing : VoiceStatus()
+    data class Success(val text: String) : VoiceStatus()
+    data class Error(val message: String) : VoiceStatus()
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
-    private val aiExtractionRepository: AiExtractionRepository
+    private val aiExtractionRepository: AiExtractionRepository,
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository
 ) : ViewModel() {
 
     private val _aiStatus = MutableStateFlow<AiStatus>(AiStatus.Idle)
+    private val _voiceStatus = MutableStateFlow<VoiceStatus>(VoiceStatus.Idle)
 
     private val currentMonth = YearMonth.now()
 
@@ -71,8 +82,9 @@ class HomeViewModel @Inject constructor(
         ) { monthExpense, monthIncome, transactions, categories ->
             DataTuple(monthExpense, monthIncome, transactions, categories)
         },
-        _aiStatus
-    ) { data, aiStatus ->
+        _aiStatus,
+        _voiceStatus
+    ) { data, aiStatus, voiceStatus ->
 
         val today = LocalDate.now()
         val todayTransactions = data.transactions.filter { it.date.toLocalDate() == today }
@@ -92,7 +104,8 @@ class HomeViewModel @Inject constructor(
             expenseCategories = data.categories,
             currentMonth = currentMonth,
             isLoading = false,
-            aiStatus = aiStatus
+            aiStatus = aiStatus,
+            voiceStatus = voiceStatus
         )
     }.stateIn(
         scope = viewModelScope,
@@ -158,5 +171,30 @@ class HomeViewModel @Inject constructor(
 
     fun resetAiStatus() {
         _aiStatus.value = AiStatus.Idle
+    }
+
+    fun isCloudVoiceConfigured(): Boolean = voiceTranscriptionRepository.isConfigured()
+
+    fun transcribeVoiceInput(audioFile: java.io.File) {
+        viewModelScope.launch {
+            _voiceStatus.value = VoiceStatus.Processing
+            val result = voiceTranscriptionRepository.transcribe(audioFile)
+            _voiceStatus.value = result.fold(
+                onSuccess = { text ->
+                    if (text.isBlank()) {
+                        VoiceStatus.Error("未识别到有效语音内容")
+                    } else {
+                        VoiceStatus.Success(text.trim())
+                    }
+                },
+                onFailure = { error ->
+                    VoiceStatus.Error(error.message ?: "云端语音识别失败")
+                }
+            )
+        }
+    }
+
+    fun resetVoiceStatus() {
+        _voiceStatus.value = VoiceStatus.Idle
     }
 }

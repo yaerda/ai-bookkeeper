@@ -69,7 +69,7 @@ class AzureOpenAiExtractorTest {
         """.trimIndent()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse(aiJson)
 
         val result = extractor.extract("星巴克咖啡35.5元")
@@ -91,7 +91,7 @@ class AzureOpenAiExtractorTest {
         val aiJson = """{"amount":10,"type":"EXPENSE","category":"其他","confidence":0.8}"""
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse(aiJson)
 
         val data = extractor.extract("买了个东西10块").getOrThrow()
@@ -104,7 +104,7 @@ class AzureOpenAiExtractorTest {
         val aiJson = """{"amount":20,"type":"EXPENSE","category":"餐饮","confidence":0.9}"""
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse(aiJson)
 
         val data = extractor.extract("午饭20元").getOrThrow()
@@ -121,7 +121,7 @@ class AzureOpenAiExtractorTest {
         """.trimIndent()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse(aiJson)
 
         val result = extractor.extractFromOcr("沃尔玛 合计128元")
@@ -135,18 +135,18 @@ class AzureOpenAiExtractorTest {
         extractor = createExtractor(apiKey = "my-key", deployment = "gpt-4o-mini")
         val aiJson = """{"amount":1,"type":"EXPENSE","category":"其他","confidence":0.5}"""
 
-        val deploymentSlot = slot<String>()
+        val urlSlot = slot<String>()
         val apiKeySlot = slot<String>()
 
         coEvery {
             service.chatCompletions(
-                capture(deploymentSlot), any(), capture(apiKeySlot), any()
+                capture(urlSlot), capture(apiKeySlot), any()
             )
         } returns buildResponse(aiJson)
 
         extractor.extract("test")
 
-        assertEquals("gpt-4o-mini", deploymentSlot.captured)
+        assertTrue(urlSlot.captured.contains("/deployments/gpt-4o-mini/chat/completions"))
         assertEquals("my-key", apiKeySlot.captured)
     }
 
@@ -158,7 +158,7 @@ class AzureOpenAiExtractorTest {
         val requestSlot = slot<ChatCompletionRequest>()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), capture(requestSlot))
+            service.chatCompletions(any(), any(), capture(requestSlot))
         } returns buildResponse(aiJson)
 
         extractor.extract("买水果50元")
@@ -179,7 +179,7 @@ class AzureOpenAiExtractorTest {
         val requestSlot = slot<ChatCompletionRequest>()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), capture(requestSlot))
+            service.chatCompletions(any(), any(), capture(requestSlot))
         } returns buildResponse(aiJson)
 
         extractor.extractFromOcr("OCR文字")
@@ -205,7 +205,7 @@ class AzureOpenAiExtractorTest {
         extractor = createExtractor()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns ChatCompletionResponse(id = "test", choices = emptyList())
 
         val result = extractor.extract("test input")
@@ -219,7 +219,7 @@ class AzureOpenAiExtractorTest {
         extractor = createExtractor()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } throws RuntimeException("Network error")
 
         val result = extractor.extract("test")
@@ -233,7 +233,7 @@ class AzureOpenAiExtractorTest {
         extractor = createExtractor()
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse("not valid json at all")
 
         val result = extractor.extract("test")
@@ -248,7 +248,7 @@ class AzureOpenAiExtractorTest {
         val aiJson = """{"amount":null,"type":"EXPENSE","category":"其他","confidence":0.7}"""
 
         coEvery {
-            service.chatCompletions(any(), any(), any(), any())
+            service.chatCompletions(any(), any(), any())
         } returns buildResponse(aiJson)
 
         val result = extractor.extract("something")

@@ -85,8 +85,9 @@ class AzureOpenAiExtractor @Inject constructor(
                 responseFormat = ResponseFormat(type = "json_object")
             )
 
+            val url = "${config.normalizedEndpoint}/openai/deployments/${config.deployment}/chat/completions?api-version=2025-01-01-preview"
             val response = service.chatCompletions(
-                deployment = config.deployment,
+                url = url,
                 apiKey = config.apiKey,
                 request = request
             )

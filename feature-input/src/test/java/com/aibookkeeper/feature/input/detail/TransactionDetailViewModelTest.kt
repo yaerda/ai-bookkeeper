@@ -2,11 +2,13 @@ package com.aibookkeeper.feature.input.detail
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -32,6 +34,7 @@ class TransactionDetailViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
+    private val categoryRepository: CategoryRepository = mockk()
     private val now = LocalDateTime.now()
 
     @BeforeEach
@@ -83,7 +86,12 @@ class TransactionDetailViewModelTest {
         transaction: Transaction? = createTransaction(id = transactionId)
     ): TransactionDetailViewModel {
         every { transactionRepository.observeById(transactionId) } returns flowOf(transaction)
-        return TransactionDetailViewModel(createSavedStateHandle(transactionId), transactionRepository)
+        every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList<Category>())
+        return TransactionDetailViewModel(
+            createSavedStateHandle(transactionId),
+            transactionRepository,
+            categoryRepository
+        )
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -203,7 +211,12 @@ class TransactionDetailViewModelTest {
             val txFlow = MutableStateFlow<Transaction?>(createTransaction(id = 1, amount = 35.0))
             every { transactionRepository.observeById(1L) } returns txFlow
 
-            val vm = TransactionDetailViewModel(createSavedStateHandle(1L), transactionRepository)
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+            val vm = TransactionDetailViewModel(
+                createSavedStateHandle(1L),
+                transactionRepository,
+                categoryRepository
+            )
 
             vm.uiState.test {
                 awaitItem() // Loading
@@ -225,7 +238,12 @@ class TransactionDetailViewModelTest {
             val txFlow = MutableStateFlow<Transaction?>(createTransaction(id = 1))
             every { transactionRepository.observeById(1L) } returns txFlow
 
-            val vm = TransactionDetailViewModel(createSavedStateHandle(1L), transactionRepository)
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+            val vm = TransactionDetailViewModel(
+                createSavedStateHandle(1L),
+                transactionRepository,
+                categoryRepository
+            )
 
             vm.uiState.test {
                 awaitItem() // Loading
@@ -291,9 +309,11 @@ class TransactionDetailViewModelTest {
         @Test
         fun should_showNotFound_when_invalidTransactionId() = runTest {
             every { transactionRepository.observeById(-1L) } returns flowOf(null)
+            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
             val vm = TransactionDetailViewModel(
                 SavedStateHandle(emptyMap<String, Any>()),
-                transactionRepository
+                transactionRepository,
+                categoryRepository
             )
 
             vm.uiState.test {

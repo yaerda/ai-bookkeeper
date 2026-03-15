@@ -11,4 +11,10 @@ data class AzureOpenAiConfig(
 ) {
     val isConfigured: Boolean
         get() = apiKey.isNotBlank() && endpoint.isNotBlank()
+
+    val normalizedEndpoint: String
+        get() = endpoint
+            .trim()
+            .substringBefore("/openai/")
+            .trimEnd('/')
 }

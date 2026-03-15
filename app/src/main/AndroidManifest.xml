@@ -19,6 +19,14 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.iflytek.speechsuite" />
+        <package android:name="com.baidu.input" />
+        <package android:name="com.baidu.input_oppo" />
+        <package android:name="com.sohu.inputmethod.sogouoem" />
+        <package android:name="com.samsung.android.bixby.agent" />
+        <package android:name="com.heytap.speechassist" />
+        <package android:name="com.huawei.vassistant" />
     </queries>
 
     <application

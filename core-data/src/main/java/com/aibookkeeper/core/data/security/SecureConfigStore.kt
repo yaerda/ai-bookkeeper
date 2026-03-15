@@ -21,6 +21,7 @@ class SecureConfigStore @Inject constructor(
         private const val KEY_AZURE_API_KEY = "azure_openai_api_key"
         private const val KEY_AZURE_ENDPOINT = "azure_openai_endpoint"
         private const val KEY_AZURE_DEPLOYMENT = "azure_openai_deployment"
+        private const val KEY_AZURE_SPEECH_DEPLOYMENT = "azure_openai_speech_deployment"
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -55,15 +56,32 @@ class SecureConfigStore @Inject constructor(
         prefs.edit().putString(KEY_AZURE_DEPLOYMENT, deployment).apply()
     }
 
+    fun getSpeechDeployment(): String = prefs.getString(KEY_AZURE_SPEECH_DEPLOYMENT, "") ?: ""
+
+    fun setSpeechDeployment(deployment: String) {
+        prefs.edit().putString(KEY_AZURE_SPEECH_DEPLOYMENT, deployment).apply()
+    }
+
     /**
-     * Migrate BuildConfig values into encrypted storage on first launch.
-     * Only writes if encrypted store is empty (preserves user overrides).
+     * Seed encrypted storage from BuildConfig for local/dev builds.
+     * Existing user edits in Settings always win over build-time defaults.
      */
-    fun migrateFromBuildConfig(apiKey: String, endpoint: String, deployment: String) {
+    fun migrateFromBuildConfig(
+        apiKey: String,
+        endpoint: String,
+        deployment: String,
+        speechDeployment: String = ""
+    ) {
         if (getApiKey().isBlank() && apiKey.isNotBlank()) setApiKey(apiKey)
         if (getEndpoint().isBlank() && endpoint.isNotBlank()) setEndpoint(endpoint)
         if (getDeployment().isBlank() && deployment.isNotBlank()) setDeployment(deployment)
+        if (getSpeechDeployment().isBlank() && speechDeployment.isNotBlank()) {
+            setSpeechDeployment(speechDeployment)
+        }
     }
 
     fun hasValidConfig(): Boolean = getApiKey().isNotBlank() && getEndpoint().isNotBlank()
+
+    fun hasValidSpeechConfig(): Boolean =
+        hasValidConfig() && getSpeechDeployment().isNotBlank()
 }

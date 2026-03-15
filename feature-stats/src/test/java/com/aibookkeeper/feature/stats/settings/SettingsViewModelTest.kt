@@ -1,7 +1,9 @@
 package com.aibookkeeper.feature.stats.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.core.data.security.SecureConfigStore
 import io.mockk.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
@@ -12,10 +14,18 @@ import org.junit.jupiter.api.Test
 class SettingsViewModelTest {
 
     private val context: Context = mockk(relaxed = true)
+    private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
+    private val legacyPrefs: SharedPreferences = mockk(relaxed = true)
 
     @BeforeEach
     fun setUp() {
         mockkObject(NotificationPermissionHelper)
+        every { context.getSharedPreferences("azure_openai", Context.MODE_PRIVATE) } returns legacyPrefs
+        every { legacyPrefs.getString(any(), any()) } returns null
+        every { secureConfigStore.getEndpoint() } returns ""
+        every { secureConfigStore.getApiKey() } returns ""
+        every { secureConfigStore.getDeployment() } returns ""
+        every { secureConfigStore.getSpeechDeployment() } returns ""
     }
 
     @AfterEach
@@ -32,7 +42,7 @@ class SettingsViewModelTest {
         every { NotificationPermissionHelper.setNotificationEnabled(context, any()) } just Runs
         every { NotificationPermissionHelper.markPermissionRequested(context) } just Runs
 
-        return SettingsViewModel(context)
+        return SettingsViewModel(context, secureConfigStore)
     }
 
     // ── Initial state ────────────────────────────────────────────────────

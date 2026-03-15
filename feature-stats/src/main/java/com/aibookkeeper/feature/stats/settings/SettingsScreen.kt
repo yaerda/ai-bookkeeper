@@ -207,14 +207,48 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
+            OutlinedTextField(
+                value = uiState.azureSpeechDeployment,
+                onValueChange = { viewModel.setAzureSpeechDeployment(it) },
+                label = { Text("语音 Deployment") },
+                placeholder = { Text("gpt-4o-mini-transcribe / whisper") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = if (uiState.azureApiKey.isNotBlank() && uiState.azureEndpoint.isNotBlank())
-                    "✅ AI 已配置" else "⚠️ 未配置 — 将使用本地规则解析",
+                    "✅ 文本 AI 已配置" else "⚠️ 文本 AI 未配置 — 将使用本地规则解析",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (uiState.azureApiKey.isNotBlank() && uiState.azureEndpoint.isNotBlank())
                     MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            Text(
+                text = if (
+                    uiState.azureApiKey.isNotBlank() &&
+                    uiState.azureEndpoint.isNotBlank() &&
+                    uiState.azureSpeechDeployment.isNotBlank()
+                ) {
+                    "✅ 云端语音已配置"
+                } else {
+                    "⚠️ 云端语音未配置 — 语音按钮将提示先配置语音 Deployment"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (
+                    uiState.azureApiKey.isNotBlank() &&
+                    uiState.azureEndpoint.isNotBlank() &&
+                    uiState.azureSpeechDeployment.isNotBlank()
+                ) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 

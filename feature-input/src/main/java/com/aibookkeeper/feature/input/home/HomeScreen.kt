@@ -1,12 +1,13 @@
 package com.aibookkeeper.feature.input.home
 
-import androidx.compose.foundation.background
+import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
+import android.content.Context
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,10 +58,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
@@ -69,6 +73,7 @@ import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.navigation.InputRoutes
 import com.aibookkeeper.core.common.extensions.toFriendlyDateString
+import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -79,9 +84,25 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
+
+    LaunchedEffect(uiState.voiceStatus) {
+        when (val status = uiState.voiceStatus) {
+            is VoiceStatus.Success -> {
+                aiInput = if (aiInput.isBlank()) status.text else "$aiInput\n${status.text}"
+                Toast.makeText(context, "语音已转成文字", Toast.LENGTH_SHORT).show()
+                viewModel.resetVoiceStatus()
+            }
+            is VoiceStatus.Error -> {
+                Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
+                viewModel.resetVoiceStatus()
+            }
+            else -> Unit
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -177,18 +198,90 @@ fun HomeScreen(
     // AI 记账 BottomSheet
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        var pendingVoiceRequest by remember { mutableStateOf(false) }
+        var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+        var recordingFile by remember { mutableStateOf<File?>(null) }
+        var isRecording by remember { mutableStateOf(false) }
 
-        val voiceLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val text = result.data
-                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                    ?.firstOrNull()
-                if (!text.isNullOrBlank()) {
-                    // 追加到已有内容，用换行分隔（每行一笔账）
-                    aiInput = if (aiInput.isBlank()) text else "${aiInput}\n${text}"
+        fun startCloudRecording() {
+            if (!viewModel.isCloudVoiceConfigured()) {
+                Toast.makeText(
+                    context,
+                    "请先到设置页填写 Azure 语音 Deployment，例如 gpt-4o-mini-transcribe。",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            val outputDir = File(context.cacheDir, "voice-input").apply { mkdirs() }
+            val outputFile = File.createTempFile("voice_", ".m4a", outputDir)
+
+            runCatching {
+                MediaRecorder().apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setAudioChannels(1)
+                    setAudioSamplingRate(16_000)
+                    setAudioEncodingBitRate(128_000)
+                    setOutputFile(outputFile.absolutePath)
+                    prepare()
+                    start()
                 }
+            }.onSuccess { recorder ->
+                activeRecorder = recorder
+                recordingFile = outputFile
+                isRecording = true
+                Toast.makeText(context, "开始录音，再点一次结束", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                outputFile.delete()
+                Toast.makeText(context, "录音启动失败，请重试", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        fun stopCloudRecording() {
+            val recorder = activeRecorder ?: return
+            val outputFile = recordingFile
+            val stopResult = runCatching { recorder.stop() }
+            recorder.release()
+            activeRecorder = null
+            isRecording = false
+
+            if (stopResult.isFailure || outputFile == null || !outputFile.exists() || outputFile.length() == 0L) {
+                outputFile?.delete()
+                recordingFile = null
+                Toast.makeText(context, "录音失败，请重新录一次", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            recordingFile = null
+            Toast.makeText(context, "录音完成，正在云端识别...", Toast.LENGTH_SHORT).show()
+            viewModel.transcribeVoiceInput(outputFile)
+        }
+
+        val audioPermissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                pendingVoiceRequest = false
+                startCloudRecording()
+            } else {
+                pendingVoiceRequest = false
+                Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                activeRecorder?.let { recorder ->
+                    runCatching {
+                        if (isRecording) {
+                            recorder.stop()
+                        }
+                    }
+                    recorder.release()
+                }
+                recordingFile?.delete()
             }
         }
 
@@ -227,59 +320,25 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(onClick = {
-                        val ctx = navController.context
-                        val baseIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...（每笔账单说一句）")
-                            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
-                        }
-                        // 各品牌预装语音引擎（按优先级尝试）
-                        // Google: 所有装了 GMS 的设备
-                        // 讯飞: OPPO/一加/vivo/部分华为
-                        // 百度: 小米/红米
-                        // 搜狗: 部分 OPPO/一加
-                        // 三星: Samsung Bixby
-                        val speechPackages = listOf(
-                            "com.google.android.googlequicksearchbox",  // Google（最通用）
-                            "com.iflytek.speechsuite",                 // 讯飞（OPPO/一加/vivo）
-                            "com.baidu.input",                         // 百度（小米/红米）
-                            "com.baidu.input_oppo",                    // 百度 OPPO 定制版
-                            "com.sohu.inputmethod.sogouoem",           // 搜狗（部分 OEM）
-                            "com.samsung.android.bixby.agent",         // 三星 Bixby
-                            "com.huawei.vassistant",                   // 华为小艺
-                        )
-                        val pm = ctx.packageManager
-                        // 先尝试默认
-                        if (baseIntent.resolveActivity(pm) != null) {
-                            voiceLauncher.launch(baseIntent)
-                        } else {
-                            // 逐个尝试已安装的语音包
-                            val launched = speechPackages.any { pkg ->
-                                try {
-                                    pm.getPackageInfo(pkg, 0)
-                                    baseIntent.setPackage(pkg)
-                                    if (baseIntent.resolveActivity(pm) != null) {
-                                        voiceLauncher.launch(baseIntent)
-                                        true
-                                    } else {
-                                        baseIntent.setPackage(null)
-                                        false
-                                    }
-                                } catch (_: Exception) {
-                                    baseIntent.setPackage(null)
-                                    false
-                                }
+                        if (uiState.voiceStatus is VoiceStatus.Processing) {
+                            Toast.makeText(context, "正在云端识别，请稍候", Toast.LENGTH_SHORT).show()
+                        } else if (context.hasAudioPermission()) {
+                            if (isRecording) {
+                                stopCloudRecording()
+                            } else {
+                                startCloudRecording()
                             }
-                            if (!launched) {
-                                Toast.makeText(ctx, "🎙 未找到语音识别服务\n请安装 Google 应用或讯飞语音", Toast.LENGTH_LONG).show()
-                            }
+                        } else if (!pendingVoiceRequest) {
+                            pendingVoiceRequest = true
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }) {
-                        Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = if (isRecording) "结束录音" else "语音",
+                            tint = if (isRecording) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary
+                        )
                     }
                     IconButton(onClick = {
                         Toast.makeText(navController.context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
@@ -293,6 +352,25 @@ fun HomeScreen(
                     }
                 }
 
+                when {
+                    isRecording -> {
+                        Text(
+                            text = "🎙 正在录音，再点一次麦克风结束",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    uiState.voiceStatus is VoiceStatus.Processing -> {
+                        Text(
+                            text = "☁️ 正在上传录音并进行 Azure 云端识别...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
+
                 Button(
                     onClick = {
                         if (aiInput.isNotBlank()) {
@@ -301,7 +379,10 @@ fun HomeScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    enabled = aiInput.isNotBlank() && uiState.aiStatus !is AiStatus.Processing
+                    enabled = aiInput.isNotBlank() &&
+                        uiState.aiStatus !is AiStatus.Processing &&
+                        !isRecording &&
+                        uiState.voiceStatus !is VoiceStatus.Processing
                 ) {
                     if (uiState.aiStatus is AiStatus.Processing) {
                         CircularProgressIndicator(
@@ -518,6 +599,11 @@ private fun parseCategoryColor(colorStr: String?): Color {
     } catch (_: Exception) {
         Color(0xFF607D8B)
     }
+}
+
+private fun Context.hasAudioPermission(): Boolean {
+    return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
 }
 
 @Preview(showBackground = true)
