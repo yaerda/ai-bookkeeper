@@ -5,9 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,19 +19,32 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,7 +58,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
-import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.navigation.InputRoutes
@@ -63,6 +73,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showAiSheet by remember { mutableStateOf(false) }
+    var aiInput by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -83,6 +95,14 @@ fun HomeScreen(
                 }
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAiSheet = true },
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "AI 记账")
+            }
+        },
         modifier = modifier
     ) { innerPadding ->
         if (uiState.isLoading) {
@@ -97,23 +117,6 @@ fun HomeScreen(
             // Summary cards
             item {
                 SummarySection(uiState = uiState)
-            }
-
-            // AI quick input bar
-            item {
-                AiQuickInputBar(
-                    onClick = { navController.navigate(InputRoutes.textInput()) }
-                )
-            }
-
-            // Quick category grid
-            item {
-                QuickCategorySection(
-                    categories = uiState.expenseCategories,
-                    onCategoryClick = { category ->
-                        navController.navigate(InputRoutes.textInput(categoryId = category.id))
-                    }
-                )
             }
 
             // Recent transactions header
@@ -158,6 +161,70 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+        }
+    }
+
+    // AI 记账 BottomSheet
+    if (showAiSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showAiSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(bottom = 32.dp)
+            ) {
+                Text(
+                    text = "✨ AI 智能记账",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = aiInput,
+                    onValueChange = { aiInput = it },
+                    placeholder = { Text("说说你花了什么，如：买芒果28块") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    maxLines = 3
+                )
+
+                // Action buttons row: voice, camera, upload
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(onClick = { /* TODO: voice input */ }) {
+                        Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { /* TODO: camera */ }) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "拍照", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = { /* TODO: file upload */ }) {
+                        Icon(Icons.Default.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        if (aiInput.isNotBlank()) {
+                            navController.navigate(InputRoutes.textInput())
+                            showAiSheet = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = aiInput.isNotBlank()
+                ) {
+                    Text("AI 识别并记账", modifier = Modifier.padding(vertical = 4.dp))
+                }
+            }
         }
     }
 }
@@ -250,119 +317,6 @@ private fun SummarySection(uiState: HomeUiState) {
 }
 
 @Composable
-private fun AiQuickInputBar(
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .clickable(onClick = onClick)
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("✨", fontSize = 20.sp)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "输入一句话，AI帮你记账...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.Send,
-                contentDescription = "AI记账",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun QuickCategorySection(
-    categories: List<Category>,
-    onCategoryClick: (Category) -> Unit
-) {
-    Column(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = "快速记账",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            maxItemsInEachRow = 4
-        ) {
-            val visibleCategories = categories.take(8)
-            visibleCategories.forEach { category ->
-                CategoryChip(
-                    category = category,
-                    onClick = { onCategoryClick(category) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            // Fill remaining slots so last row items stay same width as others
-            val remainder = visibleCategories.size % 4
-            if (remainder != 0) {
-                repeat(4 - remainder) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryChip(
-    category: Category,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val emoji = CategoryIconMapper.getEmoji(category.icon)
-    val bgColor = parseCategoryColor(category.color)
-
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(bgColor.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = emoji, fontSize = 24.sp)
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = category.name,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
 private fun RecentTransactionItem(transaction: Transaction) {
     val emoji = CategoryIconMapper.getEmoji(transaction.categoryIcon)
 
@@ -415,7 +369,7 @@ private fun RecentTransactionItem(transaction: Transaction) {
         }
 
         Text(
-            text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}¥${"%.2f".format(transaction.amount)}",
+            text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}${"%.2f".format(transaction.amount)}元",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Medium,
             color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50)
