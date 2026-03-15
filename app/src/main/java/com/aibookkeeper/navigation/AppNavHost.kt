@@ -31,6 +31,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
 import com.aibookkeeper.feature.input.navigation.InputRoutes
 import com.aibookkeeper.feature.input.navigation.inputNavGraph
+import com.aibookkeeper.feature.input.text.TextInputScreen
 import com.aibookkeeper.feature.capture.navigation.captureNavGraph
 import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
@@ -47,10 +48,10 @@ sealed class BottomNavItem(
     data object Home : BottomNavItem(InputRoutes.HOME, Icons.Default.Home, "首页")
     data object Stats : BottomNavItem("stats", Icons.Default.BarChart, "统计")
     data object Add : BottomNavItem(
-        route = InputRoutes.TEXT_INPUT,
+        route = "manual_input",
         icon = Icons.Default.Add,
         label = "记账",
-        navigateRoute = InputRoutes.textInput()
+        navigateRoute = "manual_input"
     )
     data object Bills : BottomNavItem(InputRoutes.BILLS, Icons.Default.Receipt, "账单")
     data object Settings : BottomNavItem("settings", Icons.Default.Settings, "设置")
@@ -84,12 +85,11 @@ fun AppNavHost() {
             val topLevelRoutes = setOf(
                 InputRoutes.HOME,
                 "stats",
-                InputRoutes.TEXT_INPUT,
-                InputRoutes.TEXT_INPUT_BASE,
+                "manual_input",
                 InputRoutes.BILLS,
                 "settings"
             )
-            val showBottomBar = topLevelRoutes.any { currentRoute?.startsWith(it.split("?")[0]) == true }
+            val showBottomBar = topLevelRoutes.any { currentRoute?.startsWith(it) == true }
 
             if (showBottomBar) {
                 NavigationBar {
@@ -124,7 +124,7 @@ fun AppNavHost() {
                                     }
                                 },
                                 label = { Text(item.label) },
-                                selected = currentRoute?.startsWith("text_input") == true,
+                                selected = currentRoute == "manual_input",
                                 onClick = {
                                     navController.navigate(item.navigateRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) {
@@ -179,6 +179,9 @@ fun AppNavHost() {
             }
 
             inputNavGraph(navController)
+            composable("manual_input") {
+                TextInputScreen(navController = navController)
+            }
             captureNavGraph(navController)
             statsNavGraph(
                 navController = navController,
