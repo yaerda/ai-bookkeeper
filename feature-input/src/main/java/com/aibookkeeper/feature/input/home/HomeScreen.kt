@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -239,10 +240,14 @@ fun HomeScreen(
                     }) {
                         Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton(onClick = { /* TODO: camera */ }) {
+                    IconButton(onClick = {
+                        Toast.makeText(navController.context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
+                    }) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "拍照", tint = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton(onClick = { /* TODO: file upload */ }) {
+                    IconButton(onClick = {
+                        Toast.makeText(navController.context, "📁 导入账单 · 敬请期待", Toast.LENGTH_SHORT).show()
+                    }) {
                         Icon(Icons.Default.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
