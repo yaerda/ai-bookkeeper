@@ -80,8 +80,16 @@ fun AppNavHost() {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
 
-            // Hide bottom bar on onboarding screen
-            if (currentRoute != ROUTE_ONBOARDING) {
+            // Only show bottom bar on top-level tab screens
+            val topLevelRoutes = setOf(
+                InputRoutes.HOME,
+                "stats",
+                InputRoutes.BILLS,
+                "settings"
+            )
+            val showBottomBar = topLevelRoutes.contains(currentRoute)
+
+            if (showBottomBar) {
                 NavigationBar {
                     val currentDestination = navBackStackEntry?.destination
 
