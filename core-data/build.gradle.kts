@@ -63,5 +63,6 @@ dependencies {
     testImplementation(libs.junit5)
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
     testImplementation(libs.room.testing)
 }

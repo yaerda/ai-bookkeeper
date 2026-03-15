@@ -44,4 +44,9 @@ dependencies {
     // Testing
     testImplementation(libs.junit5)
     testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
