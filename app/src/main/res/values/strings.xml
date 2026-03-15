@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AI 智能记账</string>
+
+    <!-- Notification strings -->
+    <string name="notification_channel_quick_input">快捷记账</string>
+    <string name="notification_persistent_title">AI 智能记账</string>
+    <string name="notification_persistent_text">点击快速记账</string>
+    <string name="notification_btn_text">✏️ 文字记账</string>
+    <string name="notification_btn_voice">🎙️ 语音记账</string>
+    <string name="notification_btn_camera">📷 拍照记账</string>
+    <string name="notification_success_format">已记录：%1$s ¥%2$.2f</string>
+    <string name="notification_success_low_confidence_format">已记录：%1$s ¥%2$.2f（建议确认）</string>
+    <string name="notification_undo">撤销</string>
+    <string name="toast_save_success_format">记账成功 ¥%1$.2f</string>
 </resources>

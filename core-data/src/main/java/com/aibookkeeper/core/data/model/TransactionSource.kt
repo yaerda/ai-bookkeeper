@@ -5,5 +5,6 @@ enum class TransactionSource {
     TEXT_AI,
     VOICE_AI,
     PHOTO_AI,
-    AUTO_CAPTURE
+    AUTO_CAPTURE,
+    NOTIFICATION_QUICK
 }

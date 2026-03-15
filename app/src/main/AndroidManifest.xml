@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".AiBookkeeperApp"
@@ -25,6 +27,38 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Transparent Activity for quick input from notification -->
+        <activity
+            android:name=".QuickInputActivity"
+            android:exported="true"
+            android:theme="@style/Theme.AiBookkeeper.Transparent"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="com.aibookkeeper.action.QUICK_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.aibookkeeper.action.QUICK_VOICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.aibookkeeper.action.QUICK_CAMERA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.aibookkeeper.action.QUICK_CATEGORY" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Persistent notification foreground service -->
+        <service
+            android:name="com.aibookkeeper.feature.capture.notification.PaymentNotificationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
 
     </application>
 

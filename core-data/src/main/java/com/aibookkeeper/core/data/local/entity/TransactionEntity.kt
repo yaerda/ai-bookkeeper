@@ -57,7 +57,7 @@ data class TransactionEntity(
     val updatedAt: Long,
 
     @ColumnInfo(name = "source")
-    val source: String,                     // MANUAL|TEXT_AI|VOICE_AI|PHOTO_AI|AUTO_CAPTURE
+    val source: String,                     // MANUAL|TEXT_AI|VOICE_AI|PHOTO_AI|AUTO_CAPTURE|NOTIFICATION_QUICK
 
     @ColumnInfo(name = "status")
     val status: String = "CONFIRMED",       // CONFIRMED | PENDING
