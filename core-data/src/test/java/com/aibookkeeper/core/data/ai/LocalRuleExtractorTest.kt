@@ -226,4 +226,70 @@ class LocalRuleExtractorTest {
         assertTrue(result.isSuccess)
         assertNull(result.getOrThrow().amount)
     }
+
+    // ── Regex priority regression tests ──
+    // Ensures specific categories are matched before the broad "购物" (买/购) pattern.
+
+    @Test
+    fun should_categorizeAsMedical_when_inputContainsBuyAndMedicine() = runTest {
+        val inputs = mapOf(
+            "买药50" to "医疗",
+            "购药80" to "医疗",
+            "买了些感冒药30" to "医疗",
+            "网购医用口罩25" to "医疗",
+        )
+        for ((input, expected) in inputs) {
+            val result = extractor.extract(input).getOrThrow()
+            assertEquals(expected, result.category, "Failed for input: '$input' — expected '$expected' but got '${result.category}'")
+        }
+    }
+
+    @Test
+    fun should_categorizeAsEducation_when_inputContainsBuyAndBook() = runTest {
+        val inputs = mapOf(
+            "买书100" to "教育",
+            "购书200" to "教育",
+            "买了一本新书60" to "教育",
+            "网购课程资料150" to "教育",
+        )
+        for ((input, expected) in inputs) {
+            val result = extractor.extract(input).getOrThrow()
+            assertEquals(expected, result.category, "Failed for input: '$input' — expected '$expected' but got '${result.category}'")
+        }
+    }
+
+    @Test
+    fun should_categorizeAsClothing_when_inputContainsBuyAndClothes() = runTest {
+        val inputs = mapOf(
+            "买衣服300" to "服饰",
+            "购衣服400" to "服饰",
+            "买了条裤子250" to "服饰",
+            "网购新鞋600" to "服饰",
+        )
+        for ((input, expected) in inputs) {
+            val result = extractor.extract(input).getOrThrow()
+            assertEquals(expected, result.category, "Failed for input: '$input' — expected '$expected' but got '${result.category}'")
+        }
+    }
+
+    @Test
+    fun should_categorizeAsShopping_when_inputHasOnlyBuyWithoutSpecificKeyword() = runTest {
+        val inputs = listOf("买东西200", "购物500", "超市120", "买了个充电宝99")
+        for (input in inputs) {
+            val result = extractor.extract(input).getOrThrow()
+            assertEquals("购物", result.category, "Failed for input: '$input'")
+        }
+    }
+
+    @Test
+    fun should_prioritizeSpecificCategory_when_multipleOverlappingKeywords() = runTest {
+        // "买药" contains both 买(购物) and 药(医疗) — should pick 医疗
+        assertEquals("医疗", extractor.extract("买药").getOrThrow().category)
+        // "买书" contains both 买(购物) and 书(教育) — should pick 教育
+        assertEquals("教育", extractor.extract("买书").getOrThrow().category)
+        // "买衣" contains both 买(购物) and 衣(服饰) — should pick 服饰
+        assertEquals("服饰", extractor.extract("买衣").getOrThrow().category)
+        // "购鞋" contains both 购(购物) and 鞋(服饰) — should pick 服饰
+        assertEquals("服饰", extractor.extract("购鞋").getOrThrow().category)
+    }
 }
