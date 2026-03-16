@@ -61,6 +61,9 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
     override suspend fun extractFromOcr(ocrText: String, categoryNames: List<String>): Result<ExtractionResult> =
         extract(ocrText, categoryNames)
 
+    override suspend fun extractFromImage(imageBase64: String, mimeType: String, categoryNames: List<String>): Result<ExtractionResult> =
+        Result.failure(UnsupportedOperationException("本地规则不支持图片识别，请配置 Azure OpenAI"))
+
     private val fruitKeywords = listOf(
         "芒果", "苹果", "香蕉", "橘子", "橙子", "西瓜", "葡萄", "草莓", "樱桃",
         "桃子", "梨", "柠檬", "荔枝", "龙眼", "榴莲", "火龙果", "猕猴桃", "蓝莓",

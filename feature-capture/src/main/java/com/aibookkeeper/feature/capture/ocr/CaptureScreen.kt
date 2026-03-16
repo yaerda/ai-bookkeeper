@@ -38,7 +38,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -73,6 +72,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import android.util.Base64
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -233,62 +233,52 @@ fun CaptureScreen(
             .addOnCompleteListener { recognizer.close() }
     }
 
-    // AI extraction — OCR first, then AI extracts structured data (no auto-save)
+    // AI extraction — send image directly to Azure OpenAI vision (no OCR step)
     fun runAiExtraction(uri: Uri) {
+        if (!strategyManager.isAiConfigured) {
+            errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
+            return
+        }
+
         isProcessing = true
-        processingLabel = "正在 OCR 识别..."
+        processingLabel = "AI 正在分析图片..."
         errorMessage = ""
         extractionResult = null
         savedMessage = ""
 
-        val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrElse {
-            isProcessing = false
-            errorMessage = "无法读取图片: ${it.message ?: "未知错误"}"
-            return
-        }
-
-        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-        recognizer.process(inputImage)
-            .addOnSuccessListener { visionText ->
-                val text = visionText.text.trim()
-                ocrText = text
-                if (text.isBlank()) {
-                    isProcessing = false
-                    errorMessage = "未识别到文字内容"
-                    return@addOnSuccessListener
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("无法读取图片")
+                    val bytes = inputStream.use { it.readBytes() }
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val categoryNames = categoryProvider.getCategoryNames(emptyList())
+                    strategyManager.extractFromImage(base64, mime, categoryNames)
                 }
-
-                processingLabel = "AI 正在提取消费信息..."
-                coroutineScope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            val categoryNames = categoryProvider.getCategoryNames(emptyList())
-                            strategyManager.extractFromOcr(text, categoryNames)
-                        }
-                    }.onSuccess { result ->
-                        isProcessing = false
-                        if (result.isSuccess) {
-                            extractionResult = result.getOrNull()
-                        } else {
-                            errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-                        }
-                    }.onFailure { throwable ->
-                        isProcessing = false
-                        errorMessage = throwable.message ?: "提取失败，请重试"
-                    }
-                }
-            }
-            .addOnFailureListener { e ->
+            }.onSuccess { result ->
                 isProcessing = false
-                errorMessage = "OCR识别失败: ${e.message ?: "未知错误"}"
+                if (result.isSuccess) {
+                    extractionResult = result.getOrNull()
+                } else {
+                    errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                }
+            }.onFailure { throwable ->
+                isProcessing = false
+                errorMessage = throwable.message ?: "识别失败，请重试"
             }
-            .addOnCompleteListener { recognizer.close() }
+        }
     }
 
     // Re-extract from edited OCR text (no auto-save)
     fun reExtractFromText(text: String) {
         if (text.isBlank()) {
             errorMessage = "请先识别或输入文字内容"
+            return
+        }
+        if (!strategyManager.isAiConfigured) {
+            errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
             return
         }
         isProcessing = true

@@ -13,3 +13,5 @@ captures/
 .externalNativeBuild/
 .cxx/
 logs/
+
+test-images/

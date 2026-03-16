@@ -39,6 +39,12 @@ class ExtractionStrategyManager @Inject constructor(
             ?: localExtractor.extractFromOcr(ocrText, categoryNames)
     }
 
+    suspend fun extractFromImage(imageBase64: String, mimeType: String = "image/jpeg", categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
+        return onlineExtractor.extractFromImage(imageBase64, mimeType, categoryNames)
+    }
+
+    val isAiConfigured: Boolean get() = onlineExtractor.isConfigured
+
     /**
      * Attempts online extraction with a timeout.
      * Returns null if online fails so caller can fall back.

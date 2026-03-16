@@ -3,6 +3,7 @@ package com.aibookkeeper.core.data.network
 import com.aibookkeeper.core.data.network.dto.ChatCompletionRequest
 import com.aibookkeeper.core.data.network.dto.ChatCompletionResponse
 import com.aibookkeeper.core.data.network.dto.TranscriptionResponse
+import com.aibookkeeper.core.data.network.dto.VisionChatCompletionRequest
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
@@ -25,6 +26,13 @@ interface AzureOpenAiService {
         @Url url: String,
         @Header("api-key") apiKey: String,
         @Body request: ChatCompletionRequest
+    ): ChatCompletionResponse
+
+    @POST
+    suspend fun visionChatCompletions(
+        @Url url: String,
+        @Header("api-key") apiKey: String,
+        @Body request: VisionChatCompletionRequest
     ): ChatCompletionResponse
 
     @Multipart

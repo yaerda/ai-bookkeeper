@@ -2,6 +2,7 @@ package com.aibookkeeper.core.data.network.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 // ── Request ──
 
@@ -17,6 +18,45 @@ data class ChatCompletionRequest(
 data class ChatMessage(
     val role: String,
     val content: String
+)
+
+/**
+ * Chat message with multimodal content (text + images) for vision models.
+ */
+@Serializable
+data class VisionChatMessage(
+    val role: String,
+    val content: List<ContentPart>
+)
+
+@Serializable
+data class ContentPart(
+    val type: String,
+    val text: String? = null,
+    @SerialName("image_url") val imageUrl: ImageUrlContent? = null
+)
+
+@Serializable
+data class ImageUrlContent(
+    val url: String
+)
+
+@Serializable
+data class VisionChatCompletionRequest(
+    val messages: List<@Serializable VisionChatMessageWrapper>,
+    val temperature: Double = 0.1,
+    @SerialName("max_tokens") val maxTokens: Int = 1024,
+    @SerialName("response_format") val responseFormat: ResponseFormat? = null
+)
+
+/**
+ * Wrapper that allows mixing system (string content) and user (array content) messages.
+ * Uses JsonElement for polymorphic content field.
+ */
+@Serializable
+data class VisionChatMessageWrapper(
+    val role: String,
+    val content: JsonElement
 )
 
 @Serializable
