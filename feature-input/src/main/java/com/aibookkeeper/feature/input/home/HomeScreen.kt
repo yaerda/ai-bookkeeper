@@ -120,11 +120,11 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            // Alternate icon between Add and Mic every second
+            // Alternate icon between Add and Mic every 2 seconds
             var showMic by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 while (true) {
-                    kotlinx.coroutines.delay(1000)
+                    kotlinx.coroutines.delay(2000)
                     showMic = !showMic
                 }
             }
@@ -602,7 +602,6 @@ private fun AiActionButton(
 ) {
     val isProcessing = isAiProcessing || isSpeechProcessing
 
-    // Animate button color between states
     val buttonColor by animateColorAsState(
         targetValue = when {
             isRecording -> Color(0xFFE53935)
@@ -613,7 +612,6 @@ private fun AiActionButton(
         label = "buttonColor"
     )
 
-    // Pulse animation during recording
     val pulseScale = if (isRecording) {
         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
         val scale by infiniteTransition.animateFloat(
@@ -630,6 +628,18 @@ private fun AiActionButton(
         1f
     }
 
+    // Track pressed state for long-press release detection
+    var isPressed by remember { mutableStateOf(false) }
+    var longPressTriggered by remember { mutableStateOf(false) }
+
+    // When finger lifts after a long-press recording, stop recording
+    LaunchedEffect(isPressed, longPressTriggered) {
+        if (!isPressed && longPressTriggered) {
+            onLongPressRelease()
+            longPressTriggered = false
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -639,21 +649,28 @@ private fun AiActionButton(
             .pointerInput(isProcessing) {
                 if (isProcessing) return@pointerInput
                 awaitEachGesture {
-                    val down = awaitFirstDown()
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    down.consume()
+
                     val longPressTimeout = viewConfiguration.longPressTimeoutMillis
-                    // Wait to see if it's a long press or a tap
-                    val upOrTimeout = withTimeoutOrNull(longPressTimeout) {
+                    var up = withTimeoutOrNull(longPressTimeout) {
                         waitForUpOrCancellation()
                     }
-                    if (upOrTimeout != null) {
-                        // Finger lifted before long-press threshold → it's a tap
+
+                    if (up != null) {
+                        // Finger lifted before threshold → tap
+                        up.consume()
+                        isPressed = false
                         onTap()
                     } else {
-                        // Long-press triggered
+                        // Long-press triggered → start recording
+                        longPressTriggered = true
                         onLongPressStart()
-                        // Now wait for the finger to lift
-                        waitForUpOrCancellation()
-                        onLongPressRelease()
+                        // Wait for finger lift
+                        up = waitForUpOrCancellation()
+                        up?.consume()
+                        isPressed = false
                     }
                 }
             }
