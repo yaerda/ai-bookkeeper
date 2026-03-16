@@ -108,6 +108,17 @@ fun HomeScreen(
     var showPromptReview by remember { mutableStateOf(false) }
     var startWithVoice by remember { mutableStateOf(false) }
 
+    // Auto-open AI sheet when returning from CaptureScreen
+    LaunchedEffect(Unit) {
+        val savedStateHandle = navController.currentBackStackEntry?.savedStateHandle
+        savedStateHandle?.getStateFlow("openAiSheet", false)?.collect { shouldOpen ->
+            if (shouldOpen) {
+                showAiSheet = true
+                savedStateHandle["openAiSheet"] = false
+            }
+        }
+    }
+
     LaunchedEffect(uiState.voiceStatus) {
         when (val status = uiState.voiceStatus) {
             is VoiceStatus.Success -> {

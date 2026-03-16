@@ -174,6 +174,17 @@ fun CaptureScreen(
         }
     }
 
+    // File picker (broader than gallery — picks from Files, Downloads, etc.)
+    val fileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            cameraImageFile?.delete()
+            cameraImageFile = null
+            onImageReady(uri)
+        }
+    }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -213,12 +224,17 @@ fun CaptureScreen(
         }
     }
 
+    fun navigateToTextInput() {
+        navController.previousBackStackEntry?.savedStateHandle?.set("openAiSheet", true)
+        navController.popBackStack()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("拍照识别") },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(onClick = { navigateToTextInput() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
@@ -433,7 +449,7 @@ fun CaptureScreen(
                                 )
                             }
                         }
-                        TextButton(onClick = { navController.popBackStack() }) {
+                        TextButton(onClick = { navigateToTextInput() }) {
                             Text("返回")
                         }
                     }
@@ -442,7 +458,7 @@ fun CaptureScreen(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
                     onClick = { launchCameraCapture() },
@@ -463,7 +479,18 @@ fun CaptureScreen(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("🖼️ 从相册选择")
+                    Text("🖼️ 相册")
+                }
+                OutlinedButton(
+                    onClick = {
+                        clearSelectedImage()
+                        fileLauncher.launch("image/*")
+                    },
+                    enabled = !isProcessing,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("📁 文件")
                 }
             }
         }
