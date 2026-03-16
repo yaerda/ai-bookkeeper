@@ -99,7 +99,7 @@
         <service
             android:name="com.aibookkeeper.feature.capture.notification.PaymentNotificationService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection|specialUse" />
+            android:foregroundServiceType="specialUse" />
 
         <!-- Payment notification listener (auto-capture from WeChat/Alipay/etc.) -->
         <service

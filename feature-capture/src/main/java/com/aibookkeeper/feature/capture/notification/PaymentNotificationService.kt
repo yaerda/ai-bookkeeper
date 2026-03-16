@@ -103,7 +103,15 @@ class PaymentNotificationService : Service() {
         super.onCreate()
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(nm)
-        startForeground(NotificationConstants.NOTIFICATION_ID_PERSISTENT, buildPersistentNotification())
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NotificationConstants.NOTIFICATION_ID_PERSISTENT,
+                buildPersistentNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NotificationConstants.NOTIFICATION_ID_PERSISTENT, buildPersistentNotification())
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
