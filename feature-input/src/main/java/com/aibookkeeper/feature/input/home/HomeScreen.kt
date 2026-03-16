@@ -9,8 +9,10 @@ import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,7 +82,7 @@ import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     navController: NavController,
@@ -92,6 +94,7 @@ fun HomeScreen(
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
     var showPromptReview by remember { mutableStateOf(false) }
+    var startWithVoice by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.voiceStatus) {
         when (val status = uiState.voiceStatus) {
@@ -127,11 +130,37 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAiSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(Icons.Default.Add, contentDescription = "AI 记账")
+                Text(
+                    text = "↑ 长按语音记账",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .combinedClickable(
+                            onClick = {
+                                showAiSheet = true
+                            },
+                            onLongClick = {
+                                startWithVoice = true
+                                showAiSheet = true
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "AI 记账",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         },
         modifier = modifier
@@ -308,6 +337,31 @@ fun HomeScreen(
                     recorder.release()
                 }
                 recordingFile?.delete()
+            }
+        }
+
+        // Auto-start voice recording if opened via long-press
+        if (startWithVoice) {
+            LaunchedEffect(Unit) {
+                startWithVoice = false
+                kotlinx.coroutines.delay(600)
+                when (voiceInputMode) {
+                    VoiceInputMode.SYSTEM -> {
+                        try {
+                            speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                        } catch (_: ActivityNotFoundException) {
+                            if (viewModel.isCloudVoiceConfigured()) {
+                                startCloudRecordingWithPermissionGuard()
+                            }
+                        }
+                    }
+                    VoiceInputMode.CLOUD -> {
+                        startCloudRecordingWithPermissionGuard()
+                    }
+                    else -> {
+                        Toast.makeText(context, "🎙 语音输入不可用", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
 
