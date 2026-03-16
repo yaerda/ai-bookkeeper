@@ -1,15 +1,23 @@
 package com.aibookkeeper.feature.input.text
 
+import android.app.Activity
+import android.content.Intent
 import app.cash.turbine.test
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
-import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.TransactionSource
+import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
+import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
+import com.aibookkeeper.feature.input.home.VoiceInputMode
+import com.aibookkeeper.feature.input.home.VoiceStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -26,6 +34,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import java.io.File
 import java.time.LocalDate
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -35,11 +44,18 @@ class TextInputViewModelTest {
     private val aiExtractionRepository: AiExtractionRepository = mockk()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
+    private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+        every { voiceTranscriptionRepository.isConfigured() } returns false
+        every { secureConfigStore.isLocalSpeechPreferred() } returns true
+        every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
+        every { systemSpeechRecognitionManager.extractBestResult(any()) } returns null
     }
 
     @AfterEach
@@ -48,7 +64,14 @@ class TextInputViewModelTest {
     }
 
     private fun createViewModel(): TextInputViewModel {
-        return TextInputViewModel(aiExtractionRepository, transactionRepository, categoryRepository)
+        return TextInputViewModel(
+            aiExtractionRepository,
+            transactionRepository,
+            categoryRepository,
+            voiceTranscriptionRepository,
+            secureConfigStore,
+            systemSpeechRecognitionManager
+        )
     }
 
     private fun createExtractionResult(
@@ -82,12 +105,64 @@ class TextInputViewModelTest {
         }
 
         @Test
+        fun should_haveIdleVoiceStatus_when_initialized() {
+            val vm = createViewModel()
+            assertEquals(VoiceStatus.Idle, vm.voiceStatus.value)
+        }
+
+        @Test
         fun should_haveEmptyCategories_when_initialized() = runTest {
             val vm = createViewModel()
             vm.categories.test {
                 assertEquals(emptyList<Category>(), awaitItem())
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+    }
+
+    @Nested
+    inner class VoiceInput {
+
+        @Test
+        fun should_useCloudMode_when_systemSpeechUnavailable_and_cloudConfigured() {
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
+            every { voiceTranscriptionRepository.isConfigured() } returns true
+
+            val vm = createViewModel()
+
+            assertEquals(VoiceInputMode.CLOUD, vm.currentVoiceInputMode())
+        }
+
+        @Test
+        fun should_setSuccess_when_systemRecognitionReturnsText() {
+            every { systemSpeechRecognitionManager.extractBestResult(any()) } returns "买菜20元"
+            val vm = createViewModel()
+
+            vm.handleSystemVoiceRecognitionResult(Activity.RESULT_OK, Intent())
+
+            assertEquals(VoiceStatus.Success("买菜20元"), vm.voiceStatus.value)
+        }
+
+        @Test
+        fun should_showSuccess_when_cloudTranscriptionSucceeds() = runTest {
+            coEvery { voiceTranscriptionRepository.transcribe(any()) } returns Result.success("买菜20元")
+            val vm = createViewModel()
+
+            vm.transcribeVoiceInput(File("voice.m4a"))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(VoiceStatus.Success("买菜20元"), vm.voiceStatus.value)
+        }
+
+        @Test
+        fun should_resetVoiceStatus_when_resetVoiceStatusCalled() {
+            every { systemSpeechRecognitionManager.extractBestResult(any()) } returns "买菜20元"
+            val vm = createViewModel()
+            vm.handleSystemVoiceRecognitionResult(Activity.RESULT_OK, Intent())
+
+            vm.resetVoiceStatus()
+
+            assertEquals(VoiceStatus.Idle, vm.voiceStatus.value)
         }
     }
 

@@ -1,8 +1,10 @@
 package com.aibookkeeper.feature.input.text
 
-import com.aibookkeeper.core.common.util.CategoryIconMapper
+import android.app.Activity
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.SyncStatus
@@ -13,6 +15,11 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
+import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
+import com.aibookkeeper.feature.input.home.VoiceInputMode
+import com.aibookkeeper.feature.input.home.VoiceStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.LocalDate
 import java.time.LocalDateTime
 import javax.inject.Inject
@@ -49,11 +57,16 @@ sealed interface TextInputUiState {
 class TextInputViewModel @Inject constructor(
     private val aiExtractionRepository: AiExtractionRepository,
     private val transactionRepository: TransactionRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository,
+    private val secureConfigStore: SecureConfigStore,
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<TextInputUiState>(TextInputUiState.Idle)
+    private val _voiceStatus = MutableStateFlow<VoiceStatus>(VoiceStatus.Idle)
     val uiState: StateFlow<TextInputUiState> = _uiState.asStateFlow()
+    val voiceStatus: StateFlow<VoiceStatus> = _voiceStatus.asStateFlow()
 
     val categories = categoryRepository.observeExpenseCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -181,6 +194,62 @@ class TextInputViewModel @Inject constructor(
     fun resetToIdle() {
         _uiState.value = TextInputUiState.Idle
         lastExtractionResult = null
+    }
+
+    fun isCloudVoiceConfigured(): Boolean = voiceTranscriptionRepository.isConfigured()
+
+    fun currentVoiceInputMode(): VoiceInputMode {
+        val systemSpeechAvailable = systemSpeechRecognitionManager.getAvailability().canUseSystemSpeech
+        val cloudConfigured = voiceTranscriptionRepository.isConfigured()
+        val preferLocalSpeech = secureConfigStore.isLocalSpeechPreferred()
+
+        return when {
+            preferLocalSpeech && systemSpeechAvailable -> VoiceInputMode.SYSTEM
+            cloudConfigured -> VoiceInputMode.CLOUD
+            systemSpeechAvailable -> VoiceInputMode.SYSTEM
+            else -> VoiceInputMode.UNAVAILABLE
+        }
+    }
+
+    fun buildSystemVoiceRecognitionIntent(): Intent {
+        return systemSpeechRecognitionManager.buildRecognitionIntent()
+    }
+
+    fun handleSystemVoiceRecognitionResult(resultCode: Int, data: Intent?) {
+        if (resultCode != Activity.RESULT_OK) {
+            _voiceStatus.value = VoiceStatus.Idle
+            return
+        }
+
+        val text = systemSpeechRecognitionManager.extractBestResult(data)
+        _voiceStatus.value = if (text.isNullOrBlank()) {
+            VoiceStatus.Error("未识别到有效语音内容")
+        } else {
+            VoiceStatus.Success(text)
+        }
+    }
+
+    fun transcribeVoiceInput(audioFile: File) {
+        viewModelScope.launch {
+            _voiceStatus.value = VoiceStatus.Processing
+            val result = voiceTranscriptionRepository.transcribe(audioFile)
+            _voiceStatus.value = result.fold(
+                onSuccess = { text ->
+                    if (text.isBlank()) {
+                        VoiceStatus.Error("未识别到有效语音内容")
+                    } else {
+                        VoiceStatus.Success(text.trim())
+                    }
+                },
+                onFailure = { error ->
+                    VoiceStatus.Error(error.message ?: "云端语音识别失败")
+                }
+            )
+        }
+    }
+
+    fun resetVoiceStatus() {
+        _voiceStatus.value = VoiceStatus.Idle
     }
 
     fun addCategory(name: String, icon: String = CategoryIconMapper.DEFAULT_ICON_KEY) {

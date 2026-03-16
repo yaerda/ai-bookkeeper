@@ -1,6 +1,20 @@
 package com.aibookkeeper.feature.input.text
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,9 +41,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,6 +61,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +81,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
@@ -70,8 +89,11 @@ import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.feature.input.home.VoiceInputMode
+import com.aibookkeeper.feature.input.home.VoiceStatus
+import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TextInputScreen(
     navController: NavController,
@@ -103,6 +125,7 @@ fun TextInputScreen(
                     AiInputSection(
                         categories = categories,
                         initialCategoryId = initialCategoryId,
+                        viewModel = viewModel,
                         onSubmitText = viewModel::submitText,
                         onManualSave = { amount, categoryId, categoryName, note, type ->
                             viewModel.saveManual(amount, categoryId, categoryName, note, type)
@@ -146,11 +169,12 @@ fun TextInputScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun AiInputSection(
     categories: List<Category>,
     initialCategoryId: Long? = null,
+    viewModel: TextInputViewModel,
     onSubmitText: (String) -> Unit,
     onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
     onAddCategory: (String, String) -> Unit = { _, _ -> },
@@ -167,12 +191,144 @@ private fun AiInputSection(
     var newCategoryName by remember { mutableStateOf("") }
     var newCategoryPresetIcon by remember { mutableStateOf(CategoryIconMapper.DEFAULT_ICON_KEY) }
     var newCategoryCustomEmoji by remember { mutableStateOf("") }
+    var pendingVoiceRequest by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var recordingFile by remember { mutableStateOf<File?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
+    val voiceInputMode = viewModel.currentVoiceInputMode()
 
     fun resetNewCategoryDraft() {
         newCategoryName = ""
         newCategoryPresetIcon = CategoryIconMapper.DEFAULT_ICON_KEY
         newCategoryCustomEmoji = ""
+    }
+
+    fun submitInput() {
+        keyboardController?.hide()
+        if (inputText.isNotBlank()) {
+            onSubmitText(inputText)
+        }
+    }
+
+    val speechIntentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.handleSystemVoiceRecognitionResult(
+            resultCode = result.resultCode,
+            data = result.data
+        )
+    }
+
+    fun startCloudRecording() {
+        if (!viewModel.isCloudVoiceConfigured()) {
+            Toast.makeText(
+                context,
+                "请先到设置页填写 Azure 语音 Deployment，例如 gpt-4o-mini-transcribe。",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val outputDir = File(context.cacheDir, "voice-input").apply { mkdirs() }
+        val outputFile = File.createTempFile("voice_", ".m4a", outputDir)
+
+        runCatching {
+            MediaRecorder().apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioChannels(1)
+                setAudioSamplingRate(16_000)
+                setAudioEncodingBitRate(128_000)
+                setOutputFile(outputFile.absolutePath)
+                prepare()
+                start()
+            }
+        }.onSuccess { recorder ->
+            activeRecorder = recorder
+            recordingFile = outputFile
+            isRecording = true
+            Toast.makeText(context, "开始录音，再点一次结束", Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            outputFile.delete()
+            Toast.makeText(context, "录音启动失败，请重试", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun stopCloudRecording() {
+        val recorder = activeRecorder ?: return
+        val outputFile = recordingFile
+        val stopResult = runCatching { recorder.stop() }
+        recorder.release()
+        activeRecorder = null
+        isRecording = false
+
+        if (stopResult.isFailure || outputFile == null || !outputFile.exists() || outputFile.length() == 0L) {
+            outputFile?.delete()
+            recordingFile = null
+            Toast.makeText(context, "录音失败，请重新录一次", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        recordingFile = null
+        Toast.makeText(context, "录音完成，正在云端识别...", Toast.LENGTH_SHORT).show()
+        viewModel.transcribeVoiceInput(outputFile)
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            pendingVoiceRequest = false
+            startCloudRecording()
+        } else {
+            pendingVoiceRequest = false
+            Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startCloudRecordingWithPermissionGuard() {
+        if (context.hasAudioPermission()) {
+            if (isRecording) {
+                stopCloudRecording()
+            } else {
+                startCloudRecording()
+            }
+        } else if (!pendingVoiceRequest) {
+            pendingVoiceRequest = true
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            activeRecorder?.let { recorder ->
+                runCatching {
+                    if (isRecording) {
+                        recorder.stop()
+                    }
+                }
+                recorder.release()
+            }
+            recordingFile?.delete()
+        }
+    }
+
+    LaunchedEffect(voiceStatus) {
+        when (val status = voiceStatus) {
+            is VoiceStatus.Success -> {
+                inputText = if (inputText.isBlank()) status.text else "$inputText\n${status.text}"
+                viewModel.resetVoiceStatus()
+            }
+            is VoiceStatus.Error -> {
+                Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
+                viewModel.resetVoiceStatus()
+            }
+            else -> Unit
+        }
     }
 
     // AI text input
@@ -195,10 +351,7 @@ private fun AiInputSection(
         placeholder = { Text("例如：午饭35、打车到公司15、星巴克拿铁28") },
         trailingIcon = {
             if (inputText.isNotBlank()) {
-                IconButton(onClick = {
-                    keyboardController?.hide()
-                    onSubmitText(inputText)
-                }) {
+                IconButton(onClick = ::submitInput) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = "提交",
@@ -209,30 +362,69 @@ private fun AiInputSection(
         },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(
-            onDone = {
-                keyboardController?.hide()
-                if (inputText.isNotBlank()) onSubmitText(inputText)
-            }
-        ),
+        keyboardActions = KeyboardActions(onDone = { submitInput() }),
         shape = RoundedCornerShape(16.dp)
     )
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    Button(
-        onClick = {
-            keyboardController?.hide()
-            if (inputText.isNotBlank()) onSubmitText(inputText)
-        },
-        modifier = Modifier.fillMaxWidth(),
-        enabled = inputText.isNotBlank(),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("AI 识别并记账")
+    when {
+        isRecording -> {
+            Text(
+                text = "🎙 正在录音，再点一次按钮结束",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+        voiceStatus is VoiceStatus.Processing -> {
+            Text(
+                text = "☁️ 正在上传录音并进行 Azure 云端识别...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+        voiceInputMode == VoiceInputMode.CLOUD -> {
+            Text(
+                text = "☁️ 当前使用 Azure 云端语音识别作为兜底",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
     }
+
+    AiActionButton(
+        aiInput = inputText,
+        isRecording = isRecording,
+        isSubmitting = false,
+        voiceStatus = voiceStatus,
+        onSubmit = ::submitInput,
+        onVoiceToggle = {
+            when {
+                voiceStatus is VoiceStatus.Processing -> {
+                    Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
+                }
+                isRecording -> {
+                    stopCloudRecording()
+                }
+                viewModel.isCloudVoiceConfigured() -> {
+                    startCloudRecordingWithPermissionGuard()
+                }
+                voiceInputMode == VoiceInputMode.SYSTEM -> {
+                    try {
+                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                    } catch (_: ActivityNotFoundException) {
+                        Toast.makeText(context, "系统语音不可用", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                else -> {
+                    Toast.makeText(context, "请到设置页配置 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    )
 
     Spacer(modifier = Modifier.height(24.dp))
 
@@ -262,7 +454,6 @@ private fun AiInputSection(
                 modifier = Modifier.weight(1f)
             )
         }
-        // Fill remaining slots so last row items stay same width as others
         val remainder = visibleCategories.size % 4
         if (remainder != 0) {
             repeat(4 - remainder) {
@@ -333,7 +524,6 @@ private fun AiInputSection(
         )
     }
 
-    // Edit category dialog
     editingCategory?.let { cat ->
         EditCategoryDialog(
             category = cat,
@@ -920,6 +1110,115 @@ private fun CategoryNameAndEmojiFields(
 
 private fun resolveCategoryIcon(presetIcon: String, customEmoji: String): String =
     customEmoji.trim().ifBlank { presetIcon }
+
+private fun Context.hasAudioPermission(): Boolean {
+    return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AiActionButton(
+    aiInput: String,
+    isRecording: Boolean,
+    isSubmitting: Boolean,
+    voiceStatus: VoiceStatus,
+    onSubmit: () -> Unit,
+    onVoiceToggle: () -> Unit
+) {
+    val isProcessing = isSubmitting || voiceStatus is VoiceStatus.Processing
+    val buttonColor by animateColorAsState(
+        targetValue = when {
+            isRecording -> MaterialTheme.colorScheme.error
+            isProcessing -> MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            else -> MaterialTheme.colorScheme.primary
+        },
+        label = "buttonColor"
+    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
+            )
+            .combinedClickable(
+                onClick = {
+                    when {
+                        isRecording -> onVoiceToggle()
+                        aiInput.isNotBlank() && !isProcessing -> onSubmit()
+                        else -> {}
+                    }
+                },
+                onLongClick = {
+                    if (!isProcessing) onVoiceToggle()
+                }
+            )
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            when {
+                isRecording -> {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = "录音中",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("🎙 录音中...点击结束", color = Color.White)
+                }
+                isSubmitting -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("识别中...", color = Color.White)
+                }
+                voiceStatus is VoiceStatus.Processing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("语音识别中...", color = Color.White)
+                }
+                else -> {
+                    Text(
+                        "✨ AI 识别并记账",
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+    Text(
+        text = "💡 长按按钮语音输入，点击提交 AI 识别",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+}
 
 private fun parseCategoryColor(colorStr: String?): Color {
     if (colorStr.isNullOrBlank()) return Color(0xFF607D8B)
