@@ -59,6 +59,10 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
+    // ML Kit OCR
+    implementation(libs.mlkit.text.recognition)
+    implementation(libs.mlkit.text.recognition.chinese)
+
     // Serialization (for navigation args)
     implementation(libs.kotlinx.serialization.json)
 

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.feature.capture.R
@@ -121,7 +122,7 @@ class PaymentNotificationService : Service() {
     // ── Build the persistent notification ────────────────
 
     private fun buildPersistentNotification(): Notification {
-        // Single tap opens the app's home screen (user can tap FAB there)
+        // Single tap opens the app's home screen
         val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)
         val openAppPending = PendingIntent.getActivity(
             this, 0, openAppIntent,
@@ -130,18 +131,26 @@ class PaymentNotificationService : Service() {
 
         val builder = NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("AI 智能记账")
-            .setContentText("点击打开记账")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppPending)
 
         if (secureConfigStore.isScreenshotCaptureEnabled()) {
-            builder.addAction(
-                android.R.drawable.ic_menu_camera,
-                "📸 截图记账",
-                buildScreenshotCapturePending()
-            )
+            // Compact view: title + subtitle + screenshot button in one row (always visible)
+            val compactView = RemoteViews(packageName, R.layout.notification_compact)
+            compactView.setOnClickPendingIntent(R.id.btn_screenshot, buildScreenshotCapturePending())
+
+            // Expanded view: full quick-action buttons
+            val expandedView = RemoteViews(packageName, R.layout.notification_quick_actions)
+            expandedView.setOnClickPendingIntent(R.id.btn_camera_input, buildScreenshotCapturePending())
+            expandedView.setOnClickPendingIntent(R.id.btn_text_input, openAppPending)
+
+            builder.setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                .setCustomContentView(compactView)
+                .setCustomBigContentView(expandedView)
+        } else {
+            builder.setContentTitle("AI 智能记账")
+                .setContentText("点击打开记账")
         }
 
         return builder.build()

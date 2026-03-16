@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -86,6 +87,9 @@ import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.navigation.InputRoutes
 import com.aibookkeeper.core.common.extensions.toFriendlyDateString
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -242,6 +246,7 @@ fun HomeScreen(
         var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
         var recordingFile by remember { mutableStateOf<File?>(null) }
         var isRecording by remember { mutableStateOf(false) }
+        var isImageOcrProcessing by remember { mutableStateOf(false) }
         val voiceInputMode = viewModel.currentVoiceInputMode()
 
         val speechIntentLauncher = rememberLauncherForActivityResult(
@@ -256,7 +261,22 @@ fun HomeScreen(
             contract = ActivityResultContracts.PickVisualMedia()
         ) { uri ->
             if (uri != null) {
-                Toast.makeText(context, "图片已选择，OCR识别功能开发中", Toast.LENGTH_SHORT).show()
+                isImageOcrProcessing = true
+                viewModel.resetAiStatus()
+                Toast.makeText(context, "图片已选择，正在识别...", Toast.LENGTH_SHORT).show()
+                runImageOcr(
+                    context = context,
+                    uri = uri,
+                    onSuccess = { text ->
+                        isImageOcrProcessing = false
+                        aiInput = if (aiInput.isBlank()) text else "$aiInput\n$text"
+                        Toast.makeText(context, "已提取图片文字，可继续 AI 识别", Toast.LENGTH_SHORT).show()
+                    },
+                    onError = { message ->
+                        isImageOcrProcessing = false
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                )
             }
         }
 
@@ -489,6 +509,14 @@ fun HomeScreen(
                 }
 
                 when {
+                    isImageOcrProcessing -> {
+                        Text(
+                            text = "🖼️ 正在识别图片文字...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
                     isRecording -> {
                         Text(
                             text = "🎙 正在录音，再点一次按钮结束",
@@ -738,6 +766,35 @@ private fun EmptyRecentState() {
             modifier = Modifier.padding(top = 4.dp)
         )
     }
+}
+
+private fun runImageOcr(
+    context: Context,
+    uri: Uri,
+    onSuccess: (String) -> Unit,
+    onError: (String) -> Unit
+) {
+    val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrElse {
+        onError("无法读取图片: ${it.message ?: "未知错误"}")
+        return
+    }
+    val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+
+    recognizer.process(inputImage)
+        .addOnSuccessListener { visionText ->
+            val text = visionText.text.trim()
+            if (text.isBlank()) {
+                onError("未识别到文字内容")
+            } else {
+                onSuccess(text)
+            }
+        }
+        .addOnFailureListener { e ->
+            onError("OCR识别失败: ${e.message ?: "未知错误"}")
+        }
+        .addOnCompleteListener {
+            recognizer.close()
+        }
 }
 
 private fun parseCategoryColor(colorStr: String?): Color {
