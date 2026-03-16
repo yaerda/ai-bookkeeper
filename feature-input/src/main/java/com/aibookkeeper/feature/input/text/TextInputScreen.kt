@@ -377,7 +377,7 @@ private fun AiInputSection(
             .padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Button(
+        OutlinedButton(
             onClick = { navController.navigate("capture/camera") },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(14.dp)
@@ -1248,7 +1248,10 @@ private fun AiActionButton(
         text = "💡 长按按钮语音输入，点击提交 AI 识别",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp)
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
     )
 }
 
