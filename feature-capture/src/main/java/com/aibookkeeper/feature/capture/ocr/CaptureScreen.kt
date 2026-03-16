@@ -311,19 +311,19 @@ fun CaptureScreen(
             return
         }
         isProcessing = true
-        processingLabel = "AI 正在分析图片..."
+        processingLabel = "AI 正在识别图片内容..."
         errorMessage = ""
         extractionResult = null
         savedMessage = ""
 
         coroutineScope.launch {
-            runCatching {
+            // Step 1: AI vision → get formatted text for left box
+            val visionResult = runCatching {
                 withContext(Dispatchers.IO) {
                     val inputStream = context.contentResolver.openInputStream(uri)
                         ?: throw IllegalStateException("无法读取图片")
                     val rawBytes = inputStream.use { it.readBytes() }
 
-                    // Decode → resize → compress as JPEG for Azure compatibility
                     val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
                         ?: throw IllegalStateException("无法解码图片")
                     val maxDim = 2048
@@ -349,19 +349,44 @@ fun CaptureScreen(
                     val categoryNames = categoryProvider.getCategoryNames(emptyList())
                     strategyManager.extractFromImageDetailed(base64, mime, categoryNames)
                 }
-            }.onSuccess { result ->
+            }
+
+            val outerResult = visionResult.getOrNull()
+            if (outerResult == null || outerResult.isFailure) {
                 isProcessing = false
-                if (result.isSuccess) {
-                    val visionResult = result.getOrNull()!!
-                    ocrText = visionResult.formattedText
-                    extractionResult = visionResult.summary
-                    visionItems = visionResult.items
-                } else {
-                    errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                val msg = visionResult.exceptionOrNull()?.message
+                    ?: outerResult?.exceptionOrNull()?.message
+                    ?: "未知错误"
+                errorMessage = "AI 识别失败: $msg"
+                return@launch
+            }
+
+            val detailed = outerResult.getOrNull()!!
+            ocrText = detailed.formattedText
+            visionItems = detailed.items
+
+            // Step 2: Auto-trigger text extraction for accurate right-box result
+            if (detailed.formattedText.isNotBlank()) {
+                processingLabel = "AI 正在提取消费信息..."
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val categoryNames = categoryProvider.getCategoryNames(emptyList())
+                        strategyManager.extractFromOcr(detailed.formattedText, categoryNames)
+                    }
+                }.onSuccess { textResult ->
+                    isProcessing = false
+                    if (textResult.isSuccess) extractionResult = textResult.getOrNull()
+                    else {
+                        // Fallback to vision summary if text extraction fails
+                        extractionResult = detailed.summary
+                    }
+                }.onFailure {
+                    isProcessing = false
+                    extractionResult = detailed.summary
                 }
-            }.onFailure { throwable ->
+            } else {
                 isProcessing = false
-                errorMessage = throwable.message ?: "识别失败，请重试"
+                extractionResult = detailed.summary
             }
         }
     }
