@@ -272,6 +272,17 @@ fun CaptureScreen(
         extractionResult = null
         savedMessage = ""
 
+        // Run OCR in parallel so the left box shows recognized text
+        val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrNull()
+        if (inputImage != null) {
+            val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+            recognizer.process(inputImage)
+                .addOnSuccessListener { visionText ->
+                    ocrText = visionText.text.trim()
+                }
+                .addOnCompleteListener { recognizer.close() }
+        }
+
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
