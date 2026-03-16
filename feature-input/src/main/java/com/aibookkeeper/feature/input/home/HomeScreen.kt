@@ -348,26 +348,21 @@ fun HomeScreen(
         }
 
         // Auto-start voice recording if opened via long-press
+        // Prefer in-app cloud recording to avoid system dialog popup
         if (startWithVoice) {
             LaunchedEffect(Unit) {
                 startWithVoice = false
                 kotlinx.coroutines.delay(600)
-                when (voiceInputMode) {
-                    VoiceInputMode.SYSTEM -> {
-                        try {
-                            speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                        } catch (_: ActivityNotFoundException) {
-                            if (viewModel.isCloudVoiceConfigured()) {
-                                startCloudRecordingWithPermissionGuard()
-                            }
-                        }
-                    }
-                    VoiceInputMode.CLOUD -> {
-                        startCloudRecordingWithPermissionGuard()
-                    }
-                    else -> {
+                if (viewModel.isCloudVoiceConfigured()) {
+                    startCloudRecordingWithPermissionGuard()
+                } else if (voiceInputMode == VoiceInputMode.SYSTEM) {
+                    try {
+                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                    } catch (_: ActivityNotFoundException) {
                         Toast.makeText(context, "🎙 语音输入不可用", Toast.LENGTH_SHORT).show()
                     }
+                } else {
+                    Toast.makeText(context, "🎙 语音输入不可用，请到设置页配置 Azure 语音", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -510,25 +505,17 @@ fun HomeScreen(
                         } else if (isRecording) {
                             stopCloudRecording()
                         } else {
-                            when (voiceInputMode) {
-                                VoiceInputMode.SYSTEM -> {
-                                    try {
-                                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                                    } catch (_: ActivityNotFoundException) {
-                                        if (viewModel.isCloudVoiceConfigured()) {
-                                            Toast.makeText(context, "系统语音不可用，已回退到 Azure 云端录音", Toast.LENGTH_SHORT).show()
-                                            startCloudRecordingWithPermissionGuard()
-                                        } else {
-                                            Toast.makeText(context, "当前设备没有可用的系统语音识别入口", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
+                            // Prefer in-app cloud recording to avoid system dialog popup
+                            if (viewModel.isCloudVoiceConfigured()) {
+                                startCloudRecordingWithPermissionGuard()
+                            } else if (voiceInputMode == VoiceInputMode.SYSTEM) {
+                                try {
+                                    speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                                } catch (_: ActivityNotFoundException) {
+                                    Toast.makeText(context, "系统语音不可用", Toast.LENGTH_SHORT).show()
                                 }
-                                VoiceInputMode.CLOUD -> {
-                                    startCloudRecordingWithPermissionGuard()
-                                }
-                                VoiceInputMode.UNAVAILABLE -> {
-                                    Toast.makeText(context, "请安装系统语音服务或到设置页填写 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
-                                }
+                            } else {
+                                Toast.makeText(context, "请到设置页配置 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
