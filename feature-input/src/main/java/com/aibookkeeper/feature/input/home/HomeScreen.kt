@@ -16,8 +16,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -89,7 +91,7 @@ import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     navController: NavController,
@@ -124,50 +126,33 @@ fun HomeScreen(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Hint tooltip above FAB
                 Text(
-                    text = "⬆ 上滑语音记账",
+                    text = "↑ 长按语音记账",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
-                FloatingActionButton(
-                    onClick = { },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            down.consume()
-                            val startY = down.position.y
-                            var dragged = false
-
-                            // Wait for up or drag
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull() ?: break
-                                if (!change.pressed) {
-                                    // Finger lifted
-                                    change.consume()
-                                    if (dragged) {
-                                        // Drag-up completed → open sheet with voice
-                                        startWithVoice = true
-                                        showAiSheet = true
-                                    } else {
-                                        // Simple tap → open sheet normally
-                                        showAiSheet = true
-                                    }
-                                    break
-                                }
-                                val dragDistance = startY - change.position.y
-                                if (dragDistance > 80f) {
-                                    dragged = true
-                                    change.consume()
-                                }
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .combinedClickable(
+                            onClick = {
+                                showAiSheet = true
+                            },
+                            onLongClick = {
+                                startWithVoice = true
+                                showAiSheet = true
                             }
-                        }
-                    }
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "AI 记账")
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "AI 记账",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             }
         },
@@ -327,17 +312,18 @@ fun HomeScreen(
             speechRecognizer.stopListening()
         }
 
-        // Auto-start voice recording if opened via drag-up gesture
-        LaunchedEffect(startWithVoice) {
-            if (startWithVoice) {
+        // Auto-start voice recording if opened via long-press
+        if (startWithVoice) {
+            LaunchedEffect(Unit) {
                 startWithVoice = false
                 val perm = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                    // Small delay to let the sheet animate open
-                    kotlinx.coroutines.delay(500)
+                    kotlinx.coroutines.delay(600)
                     startListening()
+                } else {
+                    Toast.makeText(context, "🎙 设备不支持语音识别", Toast.LENGTH_SHORT).show()
                 }
             }
         }
