@@ -21,10 +21,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,6 +56,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
@@ -100,34 +106,48 @@ fun CaptureScreen(
     var savedMessage by remember { mutableStateOf("") }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var showFullscreenEditor by remember { mutableStateOf(false) }
+    var showResultPage by remember { mutableStateOf(false) }
+    var showClearConfirmDialog by remember { mutableStateOf(false) }
+    var pendingImageAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     DisposableEffect(Unit) {
-        onDispose {
-            cameraImageFile?.delete()
-        }
+        onDispose { cameraImageFile?.delete() }
     }
 
-    fun clearResultState() {
+    val hasContent = ocrText.isNotBlank() || extractionResult != null || savedMessage.isNotBlank()
+
+    fun clearAll() {
+        imageUri = null
+        pendingCameraUri = null
+        showResultPage = false
         ocrText = ""
         errorMessage = ""
         extractionResult = null
         savedMessage = ""
         processingLabel = ""
-    }
-
-    fun clearSelectedImage() {
-        imageUri = null
-        pendingCameraUri = null
-        clearResultState()
         cameraImageFile?.delete()
         cameraImageFile = null
     }
 
+    // Wrap image-switching actions: confirm if content exists
+    fun switchImageWithConfirm(action: () -> Unit) {
+        if (hasContent) {
+            pendingImageAction = action
+            showClearConfirmDialog = true
+        } else {
+            action()
+        }
+    }
+
     val onImageSelected: (Uri) -> Unit = { uri ->
         pendingCameraUri = null
-        clearResultState()
+        ocrText = ""
+        errorMessage = ""
+        extractionResult = null
+        savedMessage = ""
+        processingLabel = ""
         imageUri = uri
-        // No auto-processing — user chooses when to analyze
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -140,9 +160,6 @@ fun CaptureScreen(
         } else {
             cameraImageFile?.delete()
             cameraImageFile = null
-            if (!success) {
-                Toast.makeText(context, "已取消拍照", Toast.LENGTH_SHORT).show()
-            }
         }
     }
 
@@ -179,8 +196,7 @@ fun CaptureScreen(
         }
     }
 
-    fun launchCameraCapture() {
-        clearSelectedImage()
+    fun doLaunchCamera() {
         val imageFile = runCatching {
             File.createTempFile("capture_", ".jpg", context.cacheDir)
         }.getOrElse {
@@ -194,10 +210,8 @@ fun CaptureScreen(
             Toast.makeText(context, "无法启动相机", Toast.LENGTH_SHORT).show()
             return
         }
-
         cameraImageFile = imageFile
         pendingCameraUri = captureUri
-
         if (context.hasCameraPermission()) {
             cameraLauncher.launch(captureUri)
         } else {
@@ -205,7 +219,21 @@ fun CaptureScreen(
         }
     }
 
-    // OCR only — shows text, no extraction
+    fun launchCamera() = switchImageWithConfirm {
+        clearAll()
+        doLaunchCamera()
+    }
+
+    fun launchGallery() = switchImageWithConfirm {
+        clearAll()
+        galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    fun launchFile() = switchImageWithConfirm {
+        clearAll()
+        fileLauncher.launch("image/*")
+    }
+
     fun runOcrOnly(uri: Uri) {
         isProcessing = true
         processingLabel = "正在 OCR 识别文字..."
@@ -218,7 +246,6 @@ fun CaptureScreen(
             errorMessage = "无法读取图片: ${it.message ?: "未知错误"}"
             return
         }
-
         val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
@@ -233,13 +260,11 @@ fun CaptureScreen(
             .addOnCompleteListener { recognizer.close() }
     }
 
-    // AI extraction — send image directly to Azure OpenAI vision (no OCR step)
-    fun runAiExtraction(uri: Uri) {
+    fun runAiFromImage(uri: Uri) {
         if (!strategyManager.isAiConfigured) {
             errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
             return
         }
-
         isProcessing = true
         processingLabel = "AI 正在分析图片..."
         errorMessage = ""
@@ -259,11 +284,8 @@ fun CaptureScreen(
                 }
             }.onSuccess { result ->
                 isProcessing = false
-                if (result.isSuccess) {
-                    extractionResult = result.getOrNull()
-                } else {
-                    errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-                }
+                if (result.isSuccess) extractionResult = result.getOrNull()
+                else errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
             }.onFailure { throwable ->
                 isProcessing = false
                 errorMessage = throwable.message ?: "识别失败，请重试"
@@ -271,10 +293,10 @@ fun CaptureScreen(
         }
     }
 
-    // Re-extract from edited OCR text (no auto-save)
-    fun reExtractFromText(text: String) {
+    // Convert OCR text → AI extraction (the arrow button)
+    fun runAiFromText(text: String) {
         if (text.isBlank()) {
-            errorMessage = "请先识别或输入文字内容"
+            errorMessage = "请先进行 OCR 识别"
             return
         }
         if (!strategyManager.isAiConfigured) {
@@ -295,11 +317,8 @@ fun CaptureScreen(
                 }
             }.onSuccess { result ->
                 isProcessing = false
-                if (result.isSuccess) {
-                    extractionResult = result.getOrNull()
-                } else {
-                    errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-                }
+                if (result.isSuccess) extractionResult = result.getOrNull()
+                else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
             }.onFailure { throwable ->
                 isProcessing = false
                 errorMessage = throwable.message ?: "提取失败，请重试"
@@ -307,15 +326,15 @@ fun CaptureScreen(
         }
     }
 
-    // Confirm and save
     fun confirmAndSave(data: ExtractionResult) {
         isProcessing = true
         processingLabel = "正在保存..."
+        val sourceText = ocrText.ifBlank { "AI Vision: image" }
 
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    pipeline.processNotification("OCR", ocrText)
+                    pipeline.processNotification("OCR", sourceText)
                 }
             }.onSuccess { transactionId ->
                 isProcessing = false
@@ -332,17 +351,395 @@ fun CaptureScreen(
         }
     }
 
-    fun navigateBack() {
+    // Top ← goes back to AI BottomSheet
+    fun navigateBackToAiSheet() {
         navController.previousBackStackEntry?.savedStateHandle?.set("openAiSheet", true)
         navController.popBackStack()
     }
 
+    // Success "返回" goes to Home directly
+    fun navigateBackToHome() {
+        navController.popBackStack()
+    }
+
+    @Composable
+    fun ProcessingStatusCard() {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(processingLabel, style = MaterialTheme.typography.bodyMedium)
+            }
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+    }
+
+    @Composable
+    fun ErrorMessageCard(message: String) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+
+    @Composable
+    fun ImageSourceButtons(rowModifier: Modifier = Modifier) {
+        Row(
+            modifier = rowModifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { launchCamera() },
+                enabled = !isProcessing,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("📷 拍照")
+            }
+            OutlinedButton(
+                onClick = { launchGallery() },
+                enabled = !isProcessing,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("🖼️ 相册")
+            }
+            OutlinedButton(
+                onClick = { launchFile() },
+                enabled = !isProcessing,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("📁 文件")
+            }
+        }
+    }
+
+    // ── Confirm dialog when switching images ──
+    if (showClearConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showClearConfirmDialog = false
+                pendingImageAction = null
+            },
+            title = { Text("更换图片") },
+            text = { Text("已有的识别内容将被清除，确定要更换图片吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirmDialog = false
+                    pendingImageAction?.invoke()
+                    pendingImageAction = null
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showClearConfirmDialog = false
+                    pendingImageAction = null
+                }) { Text("取消") }
+            }
+        )
+    }
+
+    // ── Fullscreen text editor ──
+    if (showFullscreenEditor) {
+        Dialog(
+            onDismissRequest = { showFullscreenEditor = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("编辑识别文本") },
+                        navigationIcon = {
+                            IconButton(onClick = { showFullscreenEditor = false }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "关闭")
+                            }
+                        },
+                        actions = {
+                            TextButton(onClick = { showFullscreenEditor = false }) {
+                                Text("完成")
+                            }
+                        }
+                    )
+                }
+            ) { padding ->
+                OutlinedTextField(
+                    value = ocrText,
+                    onValueChange = {
+                        ocrText = it
+                        extractionResult = null
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp),
+                    placeholder = { Text("OCR 识别结果") }
+                )
+            }
+        }
+    }
+
+    if (showResultPage) {
+        Dialog(
+            onDismissRequest = { showResultPage = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("识别结果") },
+                        navigationIcon = {
+                            IconButton(onClick = { showResultPage = false }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                        }
+                    )
+                }
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (isProcessing) {
+                            ProcessingStatusCard()
+                        }
+
+                        if (errorMessage.isNotBlank()) {
+                            ErrorMessageCard(errorMessage)
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "📝 OCR 文本",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        TextButton(onClick = { showFullscreenEditor = true }) {
+                                            Text("全屏")
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = ocrText,
+                                        onValueChange = {
+                                            ocrText = it
+                                            extractionResult = null
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(150.dp),
+                                        placeholder = { Text("OCR 识别文本将显示在这里") },
+                                        textStyle = MaterialTheme.typography.bodySmall,
+                                        maxLines = 8
+                                    )
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier.padding(top = 40.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                IconButton(
+                                    onClick = { runAiFromText(ocrText) },
+                                    enabled = ocrText.isNotBlank() && !isProcessing,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(
+                                            if (ocrText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant,
+                                            CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = "AI 提取",
+                                        tint = if (ocrText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Text(
+                                    "AI\n提取",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    lineHeight = MaterialTheme.typography.labelSmall.lineHeight
+                                )
+                            }
+
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "🤖 AI 结果",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    if (extractionResult != null) {
+                                        val data = extractionResult!!
+                                        Text(
+                                            text = "¥${"%.2f".format(data.amount ?: 0.0)}",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        Text(
+                                            text = "${if (data.type == "EXPENSE") "支出" else "收入"} · ${data.category}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        if (!data.merchantName.isNullOrBlank()) {
+                                            Text(
+                                                text = "🏪 ${data.merchantName}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                        if (!data.note.isNullOrBlank()) {
+                                            Text(
+                                                text = "📝 ${data.note}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                        Text(
+                                            text = "置信度 ${"%.0f".format(data.confidence * 100)}%",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "点击 AI识别 或\n中间箭头提取",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (savedMessage.isNotBlank()) {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = savedMessage,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { clearAll() },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("继续识别")
+                                        }
+                                        OutlinedButton(
+                                            onClick = { navigateBackToHome() },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("返回首页")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (extractionResult != null && savedMessage.isBlank()) {
+                        Button(
+                            onClick = { extractionResult?.let { confirmAndSave(it) } },
+                            enabled = !isProcessing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("✨ AI 记账")
+                        }
+                    }
+
+                    ImageSourceButtons(
+                        rowModifier = Modifier
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Main UI ──
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("拍照识别") },
                 navigationIcon = {
-                    IconButton(onClick = { navigateBack() }) {
+                    IconButton(onClick = { navigateBackToAiSheet() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
@@ -354,31 +751,44 @@ fun CaptureScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Image preview
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(280.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (imageUri != null) {
-                        AsyncImage(
-                            model = imageUri,
-                            contentDescription = "待识别图片",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
+                if (imageUri != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = imageUri,
+                                contentDescription = "待识别图片",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
                         Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -389,284 +799,66 @@ fun CaptureScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "选择图片后，可选择 OCR 或 AI 识别",
+                                text = "可选择 OCR 识别，或交给 AI 提取消费信息",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    ImageSourceButtons()
+                    Spacer(modifier = Modifier.weight(1f))
                 }
-            }
 
-            // Action buttons after image selected (no auto-processing)
-            if (imageUri != null && savedMessage.isBlank()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { imageUri?.let { runOcrOnly(it) } },
-                        enabled = !isProcessing,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("📝 OCR识别")
-                    }
-                    Button(
-                        onClick = { imageUri?.let { runAiExtraction(it) } },
-                        enabled = !isProcessing,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("🤖 AI识别")
-                    }
-                }
-            }
-
-            // Processing indicator
-            if (isProcessing) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    )
-                ) {
+                if (imageUri != null) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(processingLabel, fontWeight = FontWeight.Medium)
-                    }
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            // Error
-            if (errorMessage.isNotBlank()) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "识别失败",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Text(
-                            text = errorMessage,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-            }
-
-            // OCR text (editable)
-            if (ocrText.isNotBlank() && savedMessage.isBlank()) {
-                Text(
-                    text = "识别文本（可编辑后重新提取）",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                OutlinedTextField(
-                    value = ocrText,
-                    onValueChange = {
-                        ocrText = it
-                        errorMessage = ""
-                        extractionResult = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 4,
-                    maxLines = 8,
-                    enabled = !isProcessing,
-                    placeholder = { Text("OCR 识别结果") },
-                    supportingText = { Text("如有识别错误，可手动修改后点击「重新提取」") }
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { reExtractFromText(ocrText) },
-                        enabled = ocrText.isNotBlank() && !isProcessing,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("🤖 重新提取")
-                    }
-                    OutlinedButton(
-                        onClick = { clearSelectedImage() },
-                        enabled = !isProcessing,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("换张图片")
-                    }
-                }
-            }
-
-            // Extraction result preview — user must confirm
-            extractionResult?.let { data ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "📋 识别结果预览",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = "金额：¥${"%.2f".format(data.amount ?: 0.0)}",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = "类型：${if (data.type == "EXPENSE") "支出" else "收入"}",
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = "分类：${data.category}",
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        if (!data.merchantName.isNullOrBlank()) {
-                            Text(
-                                text = "商户：${data.merchantName}",
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                        if (!data.note.isNullOrBlank()) {
-                            Text(
-                                text = "备注：${data.note}",
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                        Text(
-                            text = "置信度：${"%.0f".format(data.confidence * 100)}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        OutlinedButton(
+                            onClick = {
+                                imageUri?.let {
+                                    showResultPage = true
+                                    runOcrOnly(it)
+                                }
+                            },
+                            enabled = !isProcessing,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Button(
-                                onClick = { confirmAndSave(data) },
-                                enabled = !isProcessing,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("✅ 确认记账")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    extractionResult = null
-                                    errorMessage = ""
-                                },
-                                enabled = !isProcessing,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("❌ 放弃")
-                            }
+                            Text("📝 OCR识别")
                         }
-                    }
-                }
-            }
-
-            // Success message
-            if (savedMessage.isNotBlank()) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = savedMessage,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Button(
+                            onClick = {
+                                imageUri?.let {
+                                    if (!strategyManager.isAiConfigured) {
+                                        errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
+                                    } else {
+                                        showResultPage = true
+                                        runAiFromImage(it)
+                                    }
+                                }
+                            },
+                            enabled = !isProcessing,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Button(
-                                onClick = { clearSelectedImage() },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("继续识别")
-                            }
-                            OutlinedButton(
-                                onClick = { navigateBack() },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("返回")
-                            }
+                            Text("🤖 AI识别")
                         }
                     }
                 }
+
+                if (errorMessage.isNotBlank()) {
+                    ErrorMessageCard(errorMessage)
+                }
             }
 
-            // Image source buttons (always at bottom)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { launchCameraCapture() },
-                    enabled = !isProcessing,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("📷 拍照")
-                }
-                OutlinedButton(
-                    onClick = {
-                        clearSelectedImage()
-                        galleryLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    enabled = !isProcessing,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("🖼️ 相册")
-                }
-                OutlinedButton(
-                    onClick = {
-                        clearSelectedImage()
-                        fileLauncher.launch("image/*")
-                    },
-                    enabled = !isProcessing,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("📁 文件")
-                }
+            if (imageUri != null) {
+                ImageSourceButtons(
+                    rowModifier = Modifier
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
             }
         }
     }

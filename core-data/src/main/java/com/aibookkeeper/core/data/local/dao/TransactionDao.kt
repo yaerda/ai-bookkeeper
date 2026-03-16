@@ -86,14 +86,12 @@ interface TransactionDao {
     @Query("""
         SELECT COALESCE(SUM(amount), 0.0) FROM transactions 
         WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
-        AND status = 'CONFIRMED'
     """)
     suspend fun sumByTypeAndDateRange(type: String, startMillis: Long, endMillis: Long): Double
 
     @Query("""
         SELECT COALESCE(SUM(amount), 0.0) FROM transactions 
         WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
-        AND status = 'CONFIRMED'
     """)
     fun observeSumByTypeAndDateRange(
         type: String, startMillis: Long, endMillis: Long
@@ -103,7 +101,6 @@ interface TransactionDao {
         SELECT categoryId, SUM(amount) as total 
         FROM transactions 
         WHERE type = 'EXPENSE' AND date BETWEEN :startMillis AND :endMillis
-        AND status = 'CONFIRMED'
         GROUP BY categoryId
         ORDER BY total DESC
     """)
