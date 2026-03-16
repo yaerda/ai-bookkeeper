@@ -120,11 +120,29 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
+            // Alternate icon between Add and Mic every second
+            var showMic by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(1000)
+                    showMic = !showMic
+                }
+            }
             FloatingActionButton(
                 onClick = { showAiSheet = true },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
-                Icon(Icons.Default.Add, contentDescription = "AI 记账")
+                androidx.compose.animation.Crossfade(
+                    targetState = showMic,
+                    animationSpec = tween(400),
+                    label = "fabIcon"
+                ) { isMic ->
+                    if (isMic) {
+                        Icon(Icons.Default.Mic, contentDescription = "语音记账")
+                    } else {
+                        Icon(Icons.Default.Add, contentDescription = "AI 记账")
+                    }
+                }
             }
         },
         modifier = modifier
