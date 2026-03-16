@@ -3,6 +3,8 @@ package com.aibookkeeper.feature.capture.ocr
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -288,9 +290,31 @@ fun CaptureScreen(
                 withContext(Dispatchers.IO) {
                     val inputStream = context.contentResolver.openInputStream(uri)
                         ?: throw IllegalStateException("无法读取图片")
-                    val bytes = inputStream.use { it.readBytes() }
-                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val rawBytes = inputStream.use { it.readBytes() }
+
+                    // Decode → resize → compress as JPEG for Azure compatibility
+                    val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                        ?: throw IllegalStateException("无法解码图片")
+                    val maxDim = 2048
+                    val scale = if (bitmap.width > maxDim || bitmap.height > maxDim) {
+                        maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+                    } else 1f
+                    val scaled = if (scale < 1f) {
+                        Bitmap.createScaledBitmap(
+                            bitmap,
+                            (bitmap.width * scale).toInt(),
+                            (bitmap.height * scale).toInt(),
+                            true
+                        )
+                    } else bitmap
+                    val outputStream = java.io.ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+                    val compressedBytes = outputStream.toByteArray()
+                    if (scaled !== bitmap) scaled.recycle()
+                    bitmap.recycle()
+
+                    val base64 = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+                    val mime = "image/jpeg"
                     val categoryNames = categoryProvider.getCategoryNames(emptyList())
                     strategyManager.extractFromImage(base64, mime, categoryNames)
                 }
