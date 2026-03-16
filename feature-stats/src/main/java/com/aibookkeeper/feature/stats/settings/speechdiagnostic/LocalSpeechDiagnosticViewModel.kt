@@ -352,7 +352,12 @@ class LocalSpeechDiagnosticViewModel @Inject constructor(
                 OfflinePreferredRecognizerTarget -> SpeechRecognizer.createSpeechRecognizer(context)
 
                 OnDeviceRecognizerTarget -> {
-                    SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                    } else {
+                        appendLog(DiagnosticLogLevel.WARN, "${target.label}：需要 Android 12+ (API 31)")
+                        null
+                    }
                 }
 
                 is ExplicitServiceRecognizerTarget -> {
