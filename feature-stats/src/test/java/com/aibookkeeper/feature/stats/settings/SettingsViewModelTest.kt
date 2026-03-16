@@ -3,6 +3,7 @@ package com.aibookkeeper.feature.stats.settings
 import android.content.Context
 import android.content.SharedPreferences
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.core.data.repository.PaymentPagePatternRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
@@ -17,6 +18,7 @@ class SettingsViewModelTest {
 
     private val context: Context = mockk(relaxed = true)
     private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
+    private val paymentPagePatternRepository: PaymentPagePatternRepository = mockk(relaxed = true)
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
     private val legacyPrefs: SharedPreferences = mockk(relaxed = true)
 
@@ -31,8 +33,12 @@ class SettingsViewModelTest {
         every { secureConfigStore.getSpeechDeployment() } returns ""
         every { secureConfigStore.getTextPrompt() } returns ""
         every { secureConfigStore.isLocalSpeechPreferred() } returns true
+        every { secureConfigStore.isAccessibilityMonitoringEnabled() } returns false
+        every { secureConfigStore.isScreenshotCaptureEnabled() } returns true
         every { secureConfigStore.setLocalSpeechPreferred(any()) } just Runs
         every { secureConfigStore.setTextPrompt(any()) } just Runs
+        every { secureConfigStore.setAccessibilityMonitoringEnabled(any()) } just Runs
+        every { secureConfigStore.setScreenshotCaptureEnabled(any()) } just Runs
         every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
     }
 
@@ -50,7 +56,12 @@ class SettingsViewModelTest {
         every { NotificationPermissionHelper.setNotificationEnabled(context, any()) } just Runs
         every { NotificationPermissionHelper.markPermissionRequested(context) } just Runs
 
-        return SettingsViewModel(context, secureConfigStore, systemSpeechRecognitionManager)
+        return SettingsViewModel(
+            context,
+            secureConfigStore,
+            paymentPagePatternRepository,
+            systemSpeechRecognitionManager
+        )
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -107,6 +118,18 @@ class SettingsViewModelTest {
             val state = vm.uiState.value
             assertTrue(state.isSystemSpeechAvailable)
             assertEquals("com.google.android.tts/service", state.systemSpeechProvider)
+        }
+
+        @Test
+        fun should_readSmartBookkeepingPreferences_when_initialized() {
+            every { secureConfigStore.isAccessibilityMonitoringEnabled() } returns true
+            every { secureConfigStore.isScreenshotCaptureEnabled() } returns false
+
+            val vm = createViewModel()
+
+            val state = vm.uiState.value
+            assertTrue(state.isAccessibilityMonitoringEnabled)
+            assertFalse(state.isScreenshotCaptureEnabled)
         }
     }
 
@@ -286,6 +309,30 @@ class SettingsViewModelTest {
     }
 
     @Nested
+    inner class SmartBookkeepingSettings {
+
+        @Test
+        fun should_updateStateAndPersist_when_accessibilityMonitoringChanged() {
+            val vm = createViewModel()
+
+            vm.setAccessibilityMonitoringEnabled(true)
+
+            assertTrue(vm.uiState.value.isAccessibilityMonitoringEnabled)
+            verify { secureConfigStore.setAccessibilityMonitoringEnabled(true) }
+        }
+
+        @Test
+        fun should_updateStateAndPersist_when_screenshotCaptureChanged() {
+            val vm = createViewModel()
+
+            vm.setScreenshotCaptureEnabled(false)
+
+            assertFalse(vm.uiState.value.isScreenshotCaptureEnabled)
+            verify { secureConfigStore.setScreenshotCaptureEnabled(false) }
+        }
+    }
+
+    @Nested
     inner class LocalSpeechPreference {
 
         @Test
@@ -316,9 +363,12 @@ class SettingsViewModelTest {
     // ── SettingsUiState defaults ──────────────────────────────────────────
 
     @Test
-    fun should_defaultToAllFalse_when_settingsUiStateCreated() {
+    fun should_defaultToExpectedValues_when_settingsUiStateCreated() {
         val state = SettingsUiState()
         assertFalse(state.isPermissionGranted)
         assertFalse(state.isNotificationEnabled)
+        assertFalse(state.isAccessibilityMonitoringEnabled)
+        assertTrue(state.isScreenshotCaptureEnabled)
+        assertFalse(state.isAccessibilityServiceActive)
     }
 }

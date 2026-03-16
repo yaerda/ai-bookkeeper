@@ -1,8 +1,11 @@
 package com.aibookkeeper.feature.stats.settings
 
 import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.core.data.repository.PaymentPagePatternRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +20,7 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val secureConfigStore: SecureConfigStore,
+    paymentPagePatternRepository: PaymentPagePatternRepository,
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager
 ) : ViewModel() {
 
@@ -33,10 +37,15 @@ class SettingsViewModel @Inject constructor(
     /** Re-read permission + preference state (call after returning from system settings). */
     fun refreshState() {
         val speechAvailability = systemSpeechRecognitionManager.getAvailability()
+        val isAccessibilityServiceActive = isAccessibilityServiceActive()
         _uiState.update {
             it.copy(
                 isPermissionGranted = NotificationPermissionHelper.isPermissionGranted(context),
                 isNotificationEnabled = NotificationPermissionHelper.isNotificationEnabled(context),
+                isAccessibilityMonitoringEnabled =
+                    secureConfigStore.isAccessibilityMonitoringEnabled(),
+                isScreenshotCaptureEnabled = secureConfigStore.isScreenshotCaptureEnabled(),
+                isAccessibilityServiceActive = isAccessibilityServiceActive,
                 azureEndpoint = secureConfigStore.getEndpoint(),
                 azureApiKey = secureConfigStore.getApiKey(),
                 azureDeployment = secureConfigStore.getDeployment().ifBlank { "gpt-4.1-mini" },
@@ -63,10 +72,32 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun refreshAccessibilityStatus() {
+        _uiState.update { it.copy(isAccessibilityServiceActive = isAccessibilityServiceActive()) }
+    }
+
     /** Toggle the persistent notification preference. */
     fun setNotificationEnabled(enabled: Boolean) {
         NotificationPermissionHelper.setNotificationEnabled(context, enabled)
         _uiState.update { it.copy(isNotificationEnabled = enabled) }
+    }
+
+    fun setAccessibilityMonitoringEnabled(enabled: Boolean) {
+        secureConfigStore.setAccessibilityMonitoringEnabled(enabled)
+        _uiState.update { it.copy(isAccessibilityMonitoringEnabled = enabled) }
+        refreshAccessibilityStatus()
+    }
+
+    fun setScreenshotCaptureEnabled(enabled: Boolean) {
+        secureConfigStore.setScreenshotCaptureEnabled(enabled)
+        _uiState.update { it.copy(isScreenshotCaptureEnabled = enabled) }
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
     }
 
     /** Called after the runtime permission request completes. */
@@ -123,11 +154,28 @@ class SettingsViewModel @Inject constructor(
             secureConfigStore.setDeployment(deployment)
         }
     }
+
+    private fun isAccessibilityServiceActive(): Boolean = runCatching {
+        if (Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) != 1) {
+            return@runCatching false
+        }
+
+        Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ).orEmpty().split(':').any { service ->
+            service.startsWith("${context.packageName}/") ||
+                service.contains("${context.packageName}/")
+        }
+    }.getOrDefault(false)
 }
 
 data class SettingsUiState(
     val isPermissionGranted: Boolean = false,
     val isNotificationEnabled: Boolean = false,
+    val isAccessibilityMonitoringEnabled: Boolean = false,
+    val isScreenshotCaptureEnabled: Boolean = true,
+    val isAccessibilityServiceActive: Boolean = false,
     val azureEndpoint: String = "",
     val azureApiKey: String = "",
     val azureDeployment: String = "gpt-4.1-mini",

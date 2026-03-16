@@ -24,6 +24,8 @@ class SecureConfigStore @Inject constructor(
         private const val KEY_AZURE_SPEECH_DEPLOYMENT = "azure_openai_speech_deployment"
         private const val KEY_AZURE_TEXT_PROMPT = "azure_openai_text_prompt"
         private const val KEY_PREFER_LOCAL_SPEECH = "prefer_local_speech"
+        private const val KEY_ACCESSIBILITY_MONITORING = "accessibility_monitoring_enabled"
+        private const val KEY_SCREENSHOT_CAPTURE_ENABLED = "screenshot_capture_enabled"
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -74,6 +76,20 @@ class SecureConfigStore @Inject constructor(
 
     fun setLocalSpeechPreferred(preferLocalSpeech: Boolean) {
         prefs.edit().putBoolean(KEY_PREFER_LOCAL_SPEECH, preferLocalSpeech).apply()
+    }
+
+    fun isAccessibilityMonitoringEnabled(): Boolean =
+        prefs.getBoolean(KEY_ACCESSIBILITY_MONITORING, false)
+
+    fun setAccessibilityMonitoringEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ACCESSIBILITY_MONITORING, enabled).apply()
+    }
+
+    fun isScreenshotCaptureEnabled(): Boolean =
+        prefs.getBoolean(KEY_SCREENSHOT_CAPTURE_ENABLED, true)
+
+    fun setScreenshotCaptureEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SCREENSHOT_CAPTURE_ENABLED, enabled).apply()
     }
 
     /**

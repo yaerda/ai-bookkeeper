@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -11,7 +12,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
+        tools:targetApi="34" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        tools:targetApi="34" />
 
     <!-- Allow querying speech recognition services (Android 11+ package visibility) -->
     <queries>
@@ -75,6 +79,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name="com.aibookkeeper.feature.capture.screenshot.ScreenshotCaptureActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AiBookkeeper.Transparent"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask" />
+
         <!-- Undo transaction from success-feedback notification -->
         <receiver
             android:name="com.aibookkeeper.feature.capture.notification.UndoTransactionBroadcastReceiver"
@@ -88,7 +99,7 @@
         <service
             android:name="com.aibookkeeper.feature.capture.notification.PaymentNotificationService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="mediaProjection|specialUse" />
 
         <!-- Payment notification listener (auto-capture from WeChat/Alipay/etc.) -->
         <service
@@ -98,6 +109,18 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <service
+            android:name="com.aibookkeeper.feature.capture.accessibility.PaymentAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
         </service>
 
     </application>

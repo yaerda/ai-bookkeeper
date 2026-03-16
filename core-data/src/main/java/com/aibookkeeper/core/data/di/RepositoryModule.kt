@@ -4,6 +4,8 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.AiExtractionRepositoryImpl
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.CategoryRepositoryImpl
+import com.aibookkeeper.core.data.repository.PaymentPagePatternRepository
+import com.aibookkeeper.core.data.repository.PaymentPagePatternRepositoryImpl
 import com.aibookkeeper.core.data.repository.RawEventRepository
 import com.aibookkeeper.core.data.repository.RawEventRepositoryImpl
 import com.aibookkeeper.core.data.repository.TransactionRepository
@@ -31,6 +33,12 @@ abstract class RepositoryModule {
     abstract fun bindCategoryRepository(
         impl: CategoryRepositoryImpl
     ): CategoryRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPaymentPagePatternRepository(
+        impl: PaymentPagePatternRepositoryImpl
+    ): PaymentPagePatternRepository
 
     @Binds
     @Singleton

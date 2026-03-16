@@ -3,6 +3,7 @@ package com.aibookkeeper.feature.input.home
 import android.Manifest
 import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.content.pm.PackageManager
@@ -38,9 +39,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -251,6 +252,13 @@ fun HomeScreen(
                 data = result.data
             )
         }
+        val photoPickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickVisualMedia()
+        ) { uri ->
+            if (uri != null) {
+                Toast.makeText(context, "图片已选择，OCR识别功能开发中", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         fun startCloudRecording() {
             if (!viewModel.isCloudVoiceConfigured()) {
@@ -396,27 +404,43 @@ fun HomeScreen(
                         .animateContentSize(),
                     shape = RoundedCornerShape(16.dp),
                     maxLines = 5,
-                    minLines = 3
+                    minLines = 3,
+                    trailingIcon = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                modifier = Modifier.size(40.dp),
+                                onClick = {
+                                    showPromptReview = false
+                                    showAiSheet = false
+                                    navController.navigate("capture/camera")
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.CameraAlt,
+                                    contentDescription = "拍照记账",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(
+                                modifier = Modifier.size(40.dp),
+                                onClick = {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.AttachFile,
+                                    contentDescription = "上传文件",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 )
-
-                // Action buttons row: camera, upload (voice merged into AI button below)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    IconButton(onClick = {
-                        Toast.makeText(navController.context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "拍照", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    IconButton(onClick = {
-                        Toast.makeText(navController.context, "📁 导入账单 · 敬请期待", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
 
                 TextButton(
                     onClick = { showPromptReview = !showPromptReview },

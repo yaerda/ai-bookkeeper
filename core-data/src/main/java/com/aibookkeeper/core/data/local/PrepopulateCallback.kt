@@ -36,5 +36,7 @@ class PrepopulateCallback : RoomDatabase.Callback() {
                 "INSERT INTO categories (id, name, icon, color, type, parentId, isSystem, sortOrder) VALUES $values"
             )
         }
+
+        PaymentPagePatternSeedData.insertDefaults(db)
     }
 }

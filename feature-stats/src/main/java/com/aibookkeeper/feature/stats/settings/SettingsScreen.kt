@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -142,6 +145,73 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "智能记账",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+
+            SettingsToggleRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "截图记账",
+                subtitle = "在通知栏显示截图按钮，付款后一键截图识别记账",
+                checked = uiState.isScreenshotCaptureEnabled,
+                onCheckedChange = viewModel::setScreenshotCaptureEnabled
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            SettingsToggleRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Accessibility,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "页面监听记账",
+                subtitle = if (uiState.isAccessibilityServiceActive) {
+                    "已启用 · 自动监听支付页面"
+                } else {
+                    "未启用 · 需要开启无障碍权限"
+                },
+                checked = uiState.isAccessibilityMonitoringEnabled,
+                onCheckedChange = { enabled ->
+                    viewModel.setAccessibilityMonitoringEnabled(enabled)
+                    if (enabled && !uiState.isAccessibilityServiceActive) {
+                        viewModel.openAccessibilitySettings(context)
+                    }
+                }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            if (uiState.isAccessibilityMonitoringEnabled) {
+                SettingsNavigationRow(
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    title = "支付页面规则",
+                    subtitle = "管理微信、支付宝等支付页面检测规则",
+                    onClick = { navController.navigate(StatsRoutes.PAYMENT_PATTERNS) }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // ── Azure OpenAI section ─────────────────────────────────

@@ -8,12 +8,14 @@ object NotificationConstants {
     const val CHANNEL_NAME_QUICK_INPUT = "快捷记账"
     const val NOTIFICATION_ID_PERSISTENT = 1001
     const val NOTIFICATION_ID_FEEDBACK = 1002
+    const val REQUEST_CODE_SCREENSHOT = 1005
 
     // Intent actions
     const val ACTION_QUICK_TEXT = "com.aibookkeeper.action.QUICK_TEXT"
     const val ACTION_QUICK_VOICE = "com.aibookkeeper.action.QUICK_VOICE"
     const val ACTION_QUICK_CAMERA = "com.aibookkeeper.action.QUICK_CAMERA"
     const val ACTION_QUICK_CATEGORY = "com.aibookkeeper.action.QUICK_CATEGORY"
+    const val ACTION_SCREENSHOT_CAPTURE = "com.aibookkeeper.action.SCREENSHOT_CAPTURE"
     const val ACTION_UNDO_TRANSACTION = "com.aibookkeeper.action.UNDO_TRANSACTION"
 
     // Intent extras

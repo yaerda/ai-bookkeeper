@@ -9,8 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.feature.capture.R
+import com.aibookkeeper.feature.capture.screenshot.ScreenshotCaptureActivity
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Foreground service that maintains a persistent notification in the status bar
@@ -21,6 +24,9 @@ import dagger.hilt.android.AndroidEntryPoint
  */
 @AndroidEntryPoint
 class PaymentNotificationService : Service() {
+
+    @Inject
+    lateinit var secureConfigStore: SecureConfigStore
 
     companion object {
         fun start(context: Context) {
@@ -114,14 +120,23 @@ class PaymentNotificationService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
+        val builder = NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("AI 智能记账")
             .setContentText("点击打开记账")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppPending)
-            .build()
+
+        if (secureConfigStore.isScreenshotCaptureEnabled()) {
+            builder.addAction(
+                android.R.drawable.ic_menu_camera,
+                "📸 截图记账",
+                buildScreenshotCapturePending()
+            )
+        }
+
+        return builder.build()
     }
 
     private fun buildQuickInputPending(action: String): PendingIntent {
@@ -131,6 +146,19 @@ class PaymentNotificationService : Service() {
         }
         return PendingIntent.getActivity(
             this, action.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun buildScreenshotCapturePending(): PendingIntent {
+        val intent = Intent(this, ScreenshotCaptureActivity::class.java).apply {
+            action = NotificationConstants.ACTION_SCREENSHOT_CAPTURE
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        return PendingIntent.getActivity(
+            this,
+            NotificationConstants.REQUEST_CODE_SCREENSHOT,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

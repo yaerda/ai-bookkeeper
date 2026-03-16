@@ -8,6 +8,7 @@ import com.aibookkeeper.core.data.local.PrepopulateCallback
 import com.aibookkeeper.core.data.local.dao.BudgetDao
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.dao.MonthlyStatsDao
+import com.aibookkeeper.core.data.local.dao.PaymentPagePatternDao
 import com.aibookkeeper.core.data.local.dao.RawEventDao
 import com.aibookkeeper.core.data.local.dao.TransactionDao
 import com.aibookkeeper.core.data.local.migration.Migrations
@@ -30,7 +31,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             AppConstants.DATABASE_NAME
         )
-            .addMigrations(*Migrations.ALL)
+            .addMigrations(*Migrations.ALL, AppDatabase.MIGRATION_2_3)
             .addCallback(PrepopulateCallback())
             .build()
     }
@@ -49,4 +50,8 @@ object DatabaseModule {
 
     @Provides
     fun provideRawEventDao(db: AppDatabase): RawEventDao = db.rawEventDao()
+
+    @Provides
+    fun providePaymentPagePatternDao(db: AppDatabase): PaymentPagePatternDao =
+        db.paymentPagePatternDao()
 }
