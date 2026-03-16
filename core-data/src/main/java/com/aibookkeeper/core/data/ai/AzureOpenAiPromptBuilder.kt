@@ -8,12 +8,16 @@ object AzureOpenAiPromptBuilder {
     )
 
     private fun categoriesString(categoryNames: List<String>): String =
-        (categoryNames + defaultCategories)
+        categoryNames
             .asSequence()
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
             .joinToString("|") { "\"$it\"" }
+            .ifEmpty {
+                // Fallback if DB is empty (shouldn't happen normally)
+                defaultCategories.joinToString("|") { "\"$it\"" }
+            }
 
     fun buildBaseSystemPrompt(categoryNames: List<String>): String {
         val categories = categoriesString(categoryNames)
@@ -36,7 +40,7 @@ object AzureOpenAiPromptBuilder {
              1. amount 提取数字金额，去掉货币符号
              2. 如果同一条输入里出现多个商品+金额，但本质上是同一笔消费/收入（例如“奶茶10咖啡20”），amount 应该汇总为总金额 30，note 保留主要商品摘要；如果文本里已经明确给出“一共/合计/总计”，优先使用明确总额
              3. type 默认 EXPENSE，只有明确的收入关键词才用 INCOME
-             4. category 必须从上述列表中选择最匹配的，优先选择用户自定义分类
+             4. category 必须且只能从上述候选列表中选择，绝对不可以返回列表之外的分类名。如果没有完全匹配的，选择最接近的一个
              5. 如果文本是在购买蔬菜、水果、肉蛋奶、米面粮油等原材料/生鲜，且候选中存在“食材”“生鲜”“买菜”“蔬菜”“水果”等更贴近的分类，优先选择这些分类，而不是笼统选择“餐饮”
              6. 如果候选中存在“饮料”“饮品”“茶饮”“酒水”“咖啡”“奶茶”等更贴近的分类，像茶叶、茶包、咖啡豆、矿泉水、可乐、果汁、啤酒，以及奶茶、咖啡、饮品消费都优先归到这些分类，而不是笼统选择“餐饮”或“购物”
              7. 只有明确是堂食、外卖、餐厅、套餐、便当等现成餐食消费时，才选择“餐饮”
@@ -80,7 +84,7 @@ object AzureOpenAiPromptBuilder {
             2. amount：所有项目的总金额。如果图片中有"合计/总计/实付"等，优先使用
             3. items：将每个可区分的商品/项目作为一个独立条目。如果只有一笔消费，items 只含一个元素
             4. 每个 item 的 category 独立判断，可能不同（如超市小票中有食品也有日用品）
-            5. category 必须从候选列表中选择最匹配的
+            5. category 必须且只能从候选列表中选择，绝对不可以返回列表之外的分类名
             6. 忽略无关数字（订单号、手机号、时间戳等），只关注实际支付/收入金额
             7. type 默认 EXPENSE，只有明确收入关键词才用 INCOME
             8. date 如果图片中有日期，转换为 YYYY-MM-DD 格式

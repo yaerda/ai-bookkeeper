@@ -398,7 +398,7 @@ fun CaptureScreen(
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    // Try exact match first, then fallback to "其他"
+                    // Find category or fallback to "其他"
                     val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
                         ?: categoryDao.findByNameAndType("其他", data.type)?.id
                     val now = java.time.LocalDateTime.now()
