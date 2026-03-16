@@ -42,8 +42,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -123,6 +125,7 @@ fun TextInputScreen(
             when (uiState) {
                 is TextInputUiState.Idle -> {
                     AiInputSection(
+                        navController = navController,
                         categories = categories,
                         initialCategoryId = initialCategoryId,
                         viewModel = viewModel,
@@ -172,6 +175,7 @@ fun TextInputScreen(
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun AiInputSection(
+    navController: NavController,
     categories: List<Category>,
     initialCategoryId: Long? = null,
     viewModel: TextInputViewModel,
@@ -366,7 +370,32 @@ private fun AiInputSection(
         shape = RoundedCornerShape(16.dp)
     )
 
-    Spacer(modifier = Modifier.height(12.dp))
+    // Camera & file shortcut buttons
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        OutlinedButton(
+            onClick = { navController.navigate("capture/camera") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("拍照记账", style = MaterialTheme.typography.labelMedium)
+        }
+        OutlinedButton(
+            onClick = { navController.navigate("capture/camera") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("文件上传", style = MaterialTheme.typography.labelMedium)
+        }
+    }
 
     when {
         isRecording -> {
