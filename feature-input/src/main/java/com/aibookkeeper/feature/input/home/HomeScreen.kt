@@ -1,13 +1,25 @@
 package com.aibookkeeper.feature.input.home
 
-import androidx.compose.foundation.background
+import android.Manifest
+import android.content.Intent
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
-import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,8 +41,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,8 +66,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,6 +83,7 @@ import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.navigation.InputRoutes
+import kotlinx.coroutines.withTimeoutOrNull
 import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -177,23 +193,103 @@ fun HomeScreen(
     // AI 记账 BottomSheet
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val context = LocalContext.current
 
-        val voiceLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val text = result.data
-                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                    ?.firstOrNull()
-                if (!text.isNullOrBlank()) {
-                    // 追加到已有内容，用换行分隔（每行一笔账）
-                    aiInput = if (aiInput.isBlank()) text else "${aiInput}\n${text}"
-                }
+        // Speech recognizer state
+        var isRecording by remember { mutableStateOf(false) }
+        var isSpeechProcessing by remember { mutableStateOf(false) }
+        var hasPermission by remember { mutableStateOf(false) }
+
+        val permissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            hasPermission = granted
+            if (!granted) {
+                Toast.makeText(context, "需要麦克风权限才能语音输入", Toast.LENGTH_SHORT).show()
             }
         }
 
+        // In-app SpeechRecognizer (no system dialog)
+        val speechRecognizer = remember {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                try {
+                    speechRecognizer.cancel()
+                    speechRecognizer.destroy()
+                } catch (_: Exception) {}
+            }
+        }
+
+        // Set up recognition listener
+        val recognitionListener = remember {
+            object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    isSpeechProcessing = true
+                    isRecording = false
+                }
+                override fun onError(error: Int) {
+                    isRecording = false
+                    isSpeechProcessing = false
+                    val msg = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音，请重试"
+                        SpeechRecognizer.ERROR_AUDIO -> "录音错误"
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络错误，请检查网络"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "未检测到语音"
+                        else -> "语音识别失败(错误码:$error)"
+                    }
+                    Toast.makeText(context, "🎙 $msg", Toast.LENGTH_SHORT).show()
+                }
+                override fun onResults(results: Bundle?) {
+                    isSpeechProcessing = false
+                    val text = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                    if (!text.isNullOrBlank()) {
+                        aiInput = if (aiInput.isBlank()) text else "${aiInput}\n${text}"
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            }
+        }
+
+        LaunchedEffect(speechRecognizer) {
+            speechRecognizer.setRecognitionListener(recognitionListener)
+        }
+
+        fun startListening() {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            }
+            speechRecognizer.startListening(intent)
+            isRecording = true
+        }
+
+        fun stopListening() {
+            speechRecognizer.stopListening()
+        }
+
         ModalBottomSheet(
-            onDismissRequest = { showAiSheet = false },
+            onDismissRequest = {
+                if (isRecording) {
+                    speechRecognizer.cancel()
+                    isRecording = false
+                }
+                showAiSheet = false
+            },
             sheetState = sheetState
         ) {
             Column(
@@ -219,7 +315,7 @@ fun HomeScreen(
                     minLines = 2
                 )
 
-                // Action buttons row: voice, camera, upload
+                // Action buttons row: camera, upload (mic removed — merged into AI button)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -227,94 +323,57 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(onClick = {
-                        val ctx = navController.context
-                        val baseIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "说说你花了什么...（每笔账单说一句）")
-                            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-                            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
-                        }
-                        // 各品牌预装语音引擎（按优先级尝试）
-                        // Google: 所有装了 GMS 的设备
-                        // 讯飞: OPPO/一加/vivo/部分华为
-                        // 百度: 小米/红米
-                        // 搜狗: 部分 OPPO/一加
-                        // 三星: Samsung Bixby
-                        val speechPackages = listOf(
-                            "com.google.android.googlequicksearchbox",  // Google（最通用）
-                            "com.iflytek.speechsuite",                 // 讯飞（OPPO/一加/vivo）
-                            "com.baidu.input",                         // 百度（小米/红米）
-                            "com.baidu.input_oppo",                    // 百度 OPPO 定制版
-                            "com.sohu.inputmethod.sogouoem",           // 搜狗（部分 OEM）
-                            "com.samsung.android.bixby.agent",         // 三星 Bixby
-                            "com.huawei.vassistant",                   // 华为小艺
-                        )
-                        val pm = ctx.packageManager
-                        // 先尝试默认
-                        if (baseIntent.resolveActivity(pm) != null) {
-                            voiceLauncher.launch(baseIntent)
-                        } else {
-                            // 逐个尝试已安装的语音包
-                            val launched = speechPackages.any { pkg ->
-                                try {
-                                    pm.getPackageInfo(pkg, 0)
-                                    baseIntent.setPackage(pkg)
-                                    if (baseIntent.resolveActivity(pm) != null) {
-                                        voiceLauncher.launch(baseIntent)
-                                        true
-                                    } else {
-                                        baseIntent.setPackage(null)
-                                        false
-                                    }
-                                } catch (_: Exception) {
-                                    baseIntent.setPackage(null)
-                                    false
-                                }
-                            }
-                            if (!launched) {
-                                Toast.makeText(ctx, "🎙 未找到语音识别服务\n请安装 Google 应用或讯飞语音", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }) {
-                        Icon(Icons.Default.Mic, contentDescription = "语音", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    IconButton(onClick = {
-                        Toast.makeText(navController.context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "拍照", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = {
-                        Toast.makeText(navController.context, "📁 导入账单 · 敬请期待", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "📁 导入账单 · 敬请期待", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
 
-                Button(
-                    onClick = {
+                // Unified AI button: tap = submit, long-press = voice input
+                AiActionButton(
+                    isRecording = isRecording,
+                    isSpeechProcessing = isSpeechProcessing,
+                    isAiProcessing = uiState.aiStatus is AiStatus.Processing,
+                    hasInput = aiInput.isNotBlank(),
+                    onTap = {
                         if (aiInput.isNotBlank()) {
                             viewModel.submitAiInput(aiInput)
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = aiInput.isNotBlank() && uiState.aiStatus !is AiStatus.Processing
-                ) {
-                    if (uiState.aiStatus is AiStatus.Processing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("识别中...")
-                    } else {
-                        Text("AI 识别并记账", modifier = Modifier.padding(vertical = 4.dp))
+                    onLongPressStart = {
+                        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                            Toast.makeText(context, "🎙 设备不支持语音识别", Toast.LENGTH_SHORT).show()
+                            return@AiActionButton
+                        }
+                        val perm = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            return@AiActionButton
+                        }
+                        startListening()
+                    },
+                    onLongPressRelease = {
+                        if (isRecording) {
+                            stopListening()
+                        }
                     }
-                }
+                )
+
+                // Hint text
+                Text(
+                    text = "💡 长按按钮语音输入，点击提交 AI 识别",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    textAlign = TextAlign.Center
+                )
 
                 // Show result
                 when (val status = uiState.aiStatus) {
@@ -325,7 +384,6 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(top = 8.dp)
                         )
-                        // Auto close after success
                         LaunchedEffect(status) {
                             kotlinx.coroutines.delay(1500)
                             aiInput = ""
@@ -508,6 +566,141 @@ private fun EmptyRecentState() {
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 4.dp)
         )
+    }
+}
+
+@Composable
+private fun AiActionButton(
+    isRecording: Boolean,
+    isSpeechProcessing: Boolean,
+    isAiProcessing: Boolean,
+    hasInput: Boolean,
+    onTap: () -> Unit,
+    onLongPressStart: () -> Unit,
+    onLongPressRelease: () -> Unit
+) {
+    val isProcessing = isAiProcessing || isSpeechProcessing
+
+    // Animate button color between states
+    val buttonColor by animateColorAsState(
+        targetValue = when {
+            isRecording -> Color(0xFFE53935)
+            isProcessing -> MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            else -> MaterialTheme.colorScheme.primary
+        },
+        animationSpec = tween(300),
+        label = "buttonColor"
+    )
+
+    // Pulse animation during recording
+    val pulseScale = if (isRecording) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(600),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+        scale
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(pulseScale)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (!hasInput && !isRecording && !isProcessing)
+                    buttonColor.copy(alpha = 0.5f)
+                else
+                    buttonColor
+            )
+            .pointerInput(isProcessing) {
+                if (isProcessing) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val longPressTimeout = viewConfiguration.longPressTimeoutMillis
+                    // Wait to see if it's a long press or a tap
+                    val upOrTimeout = withTimeoutOrNull(longPressTimeout) {
+                        waitForUpOrCancellation()
+                    }
+                    if (upOrTimeout != null) {
+                        // Finger lifted before long-press threshold → it's a tap
+                        onTap()
+                    } else {
+                        // Long-press triggered
+                        onLongPressStart()
+                        // Now wait for the finger to lift
+                        waitForUpOrCancellation()
+                        onLongPressRelease()
+                    }
+                }
+            }
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            when {
+                isRecording -> {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "正在录音... 松开结束",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                isSpeechProcessing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "语音识别中...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+                isAiProcessing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "AI 识别中...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+                else -> {
+                    Text(
+                        text = "✨ AI 识别并记账",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
