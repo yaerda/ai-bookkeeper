@@ -31,8 +31,10 @@ import com.aibookkeeper.feature.capture.navigation.captureNavGraph
 import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
 import com.aibookkeeper.onboarding.OnboardingScreen
+import com.aibookkeeper.splash.SplashScreen
 
 private const val ROUTE_ONBOARDING = "onboarding"
+private const val ROUTE_SPLASH = "splash"
 
 sealed class BottomNavItem(
     val route: String,
@@ -57,11 +59,13 @@ fun AppNavHost() {
     val navController = rememberNavController()
     val context = LocalContext.current
 
-    val startDestination = if (NotificationPermissionHelper.isOnboardingCompleted(context)) {
+    val actualDestination = if (NotificationPermissionHelper.isOnboardingCompleted(context)) {
         InputRoutes.HOME
     } else {
         ROUTE_ONBOARDING
     }
+
+    val startDestination = ROUTE_SPLASH
 
     val bottomNavItems = listOf(
         BottomNavItem.Home,
@@ -116,6 +120,17 @@ fun AppNavHost() {
             startDestination = startDestination,
             modifier = Modifier.padding(innerPadding)
         ) {
+            // Full-screen splash image
+            composable(ROUTE_SPLASH) {
+                SplashScreen(
+                    onSplashFinished = {
+                        navController.navigate(actualDestination) {
+                            popUpTo(ROUTE_SPLASH) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
             // Onboarding (first launch only)
             composable(ROUTE_ONBOARDING) {
                 OnboardingScreen(
