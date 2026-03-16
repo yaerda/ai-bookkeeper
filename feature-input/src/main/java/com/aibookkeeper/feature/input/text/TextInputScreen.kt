@@ -1130,7 +1130,7 @@ private fun CategoryNameAndEmojiFields(
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
-            label = { Text("分类名称（最多6字符）") },
+            label = { Text("分类名称") },
             singleLine = true,
             modifier = Modifier.weight(1f)
         )
