@@ -26,6 +26,7 @@ class SecureConfigStore @Inject constructor(
         private const val KEY_PREFER_LOCAL_SPEECH = "prefer_local_speech"
         private const val KEY_ACCESSIBILITY_MONITORING = "accessibility_monitoring_enabled"
         private const val KEY_SCREENSHOT_CAPTURE_ENABLED = "screenshot_capture_enabled"
+        private const val KEY_IGNORED_UPDATE_VERSION = "ignored_update_version"
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -90,6 +91,13 @@ class SecureConfigStore @Inject constructor(
 
     fun setScreenshotCaptureEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SCREENSHOT_CAPTURE_ENABLED, enabled).apply()
+    }
+
+    fun getIgnoredUpdateVersion(): String =
+        prefs.getString(KEY_IGNORED_UPDATE_VERSION, "") ?: ""
+
+    fun setIgnoredUpdateVersion(version: String) {
+        prefs.edit().putString(KEY_IGNORED_UPDATE_VERSION, version).apply()
     }
 
     /**

@@ -36,6 +36,7 @@ import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
 import com.aibookkeeper.onboarding.OnboardingScreen
 import com.aibookkeeper.splash.SplashScreen
+import com.aibookkeeper.update.UpdateCheckEffect
 
 private const val ROUTE_ONBOARDING = "onboarding"
 private const val ROUTE_SPLASH = "splash"
@@ -62,6 +63,8 @@ sealed class BottomNavItem(
 fun AppNavHost() {
     val navController = rememberNavController()
     val context = LocalContext.current
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
 
     val actualDestination = if (NotificationPermissionHelper.isOnboardingCompleted(context)) {
         InputRoutes.HOME
@@ -79,11 +82,12 @@ fun AppNavHost() {
         BottomNavItem.Settings
     )
 
+    if (currentRoute != null && currentRoute != ROUTE_SPLASH) {
+        UpdateCheckEffect()
+    }
+
     Scaffold(
         bottomBar = {
-            val navBackStackEntry by navController.currentBackStackEntryAsState()
-            val currentRoute = navBackStackEntry?.destination?.route
-
             // Only show bottom bar on top-level tab screens
             val topLevelRoutes = setOf(
                 InputRoutes.HOME,

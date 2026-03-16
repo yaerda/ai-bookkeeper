@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -388,6 +389,28 @@ fun SettingsScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "关于",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+
+            SettingsNavigationRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "更新日志",
+                subtitle = "查看版本更新历史",
+                onClick = { navController.navigate(StatsRoutes.CHANGELOG) }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
             // Version info
             Text(
