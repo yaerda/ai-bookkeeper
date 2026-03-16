@@ -7,27 +7,34 @@ import android.content.Intent
 import android.util.Log
 import android.widget.Toast
 import com.aibookkeeper.core.data.repository.TransactionRepository
-import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Handles the "撤销" (Undo) action from the success-feedback notification.
  * Deletes the transaction identified by [NotificationConstants.EXTRA_TRANSACTION_ID]
  * and dismisses the feedback notification.
  */
-@AndroidEntryPoint
 class UndoTransactionBroadcastReceiver : BroadcastReceiver() {
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface UndoReceiverEntryPoint {
+        fun transactionRepository(): TransactionRepository
+    }
 
     companion object {
         private const val TAG = "UndoTxReceiver"
     }
 
-    @Inject
-    lateinit var transactionRepository: TransactionRepository
+    // Visible for testing — in production, resolved via EntryPointAccessors
+    internal var transactionRepository: TransactionRepository? = null
 
     private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -40,6 +47,12 @@ class UndoTransactionBroadcastReceiver : BroadcastReceiver() {
             return
         }
 
+        // Resolve repository via Hilt EntryPoint if not injected (testing)
+        val repo = transactionRepository ?: EntryPointAccessors.fromApplication(
+            context.applicationContext, UndoReceiverEntryPoint::class.java
+        ).transactionRepository()
+        transactionRepository = repo
+
         // Dismiss the feedback notification immediately
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(NotificationConstants.NOTIFICATION_ID_FEEDBACK)
@@ -47,7 +60,7 @@ class UndoTransactionBroadcastReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         receiverScope.launch {
             try {
-                transactionRepository.delete(transactionId)
+                repo.delete(transactionId)
                     .onSuccess {
                         Log.i(TAG, "Transaction $transactionId undone successfully")
                         launch(Dispatchers.Main) {

@@ -30,12 +30,7 @@ class UndoTransactionBroadcastReceiverTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
 
         receiver = spyk(UndoTransactionBroadcastReceiver())
-
-        // Inject mocked repository (normally done by Hilt)
-        receiver::class.java.getDeclaredField("transactionRepository").apply {
-            isAccessible = true
-            set(receiver, transactionRepository)
-        }
+        receiver.transactionRepository = transactionRepository
 
         every { context.getSystemService(Context.NOTIFICATION_SERVICE) } returns notificationManager
         every { receiver.goAsync() } returns pendingResult
