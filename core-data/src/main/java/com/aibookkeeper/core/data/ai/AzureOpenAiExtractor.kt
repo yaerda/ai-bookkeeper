@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import retrofit2.HttpException
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -103,11 +104,16 @@ class AzureOpenAiExtractor @Inject constructor(
             )
 
             val url = "${config.normalizedEndpoint}/openai/deployments/${config.deployment}/chat/completions?api-version=2025-01-01-preview"
-            val response = service.visionChatCompletions(
-                url = url,
-                apiKey = config.apiKey,
-                request = request
-            )
+            val response = try {
+                service.visionChatCompletions(
+                    url = url,
+                    apiKey = config.apiKey,
+                    request = request
+                )
+            } catch (e: HttpException) {
+                val errorBody = e.response()?.errorBody()?.string() ?: "无详细信息"
+                throw IllegalStateException("HTTP ${e.code()}: $errorBody", e)
+            }
 
             val content = response.choices.firstOrNull()?.message?.content
                 ?: throw IllegalStateException("Empty AI response")
@@ -148,11 +154,16 @@ class AzureOpenAiExtractor @Inject constructor(
             )
 
             val url = "${config.normalizedEndpoint}/openai/deployments/${config.deployment}/chat/completions?api-version=2025-01-01-preview"
-            val response = service.chatCompletions(
-                url = url,
-                apiKey = config.apiKey,
-                request = request
-            )
+            val response = try {
+                service.chatCompletions(
+                    url = url,
+                    apiKey = config.apiKey,
+                    request = request
+                )
+            } catch (e: HttpException) {
+                val errorBody = e.response()?.errorBody()?.string() ?: "无详细信息"
+                throw IllegalStateException("HTTP ${e.code()}: $errorBody", e)
+            }
 
             val content = response.choices.firstOrNull()?.message?.content
                 ?: throw IllegalStateException("Empty AI response")

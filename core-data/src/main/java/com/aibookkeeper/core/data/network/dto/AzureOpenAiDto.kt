@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonElement
 data class ChatCompletionRequest(
     val messages: List<ChatMessage>,
     val temperature: Double = 0.1,
-    @SerialName("max_tokens") val maxTokens: Int = 512,
+    @SerialName("max_completion_tokens") val maxTokens: Int = 512,
     @SerialName("response_format") val responseFormat: ResponseFormat? = null
 )
 
@@ -45,7 +45,7 @@ data class ImageUrlContent(
 data class VisionChatCompletionRequest(
     val messages: List<@Serializable VisionChatMessageWrapper>,
     val temperature: Double = 0.1,
-    @SerialName("max_tokens") val maxTokens: Int = 1024,
+    @SerialName("max_completion_tokens") val maxTokens: Int = 1024,
     @SerialName("response_format") val responseFormat: ResponseFormat? = null
 )
 
