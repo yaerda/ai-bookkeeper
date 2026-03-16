@@ -9,6 +9,13 @@ import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -389,64 +396,21 @@ fun HomeScreen(
                     value = aiInput,
                     onValueChange = { aiInput = it },
                     placeholder = { Text("每行一笔，如：\n买芒果28块\n打车15元") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(),
                     shape = RoundedCornerShape(16.dp),
                     maxLines = 5,
-                    minLines = 2
+                    minLines = 3
                 )
 
-                // Action buttons row: voice, camera, upload
+                // Action buttons row: camera, upload (voice merged into AI button below)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IconButton(onClick = {
-                        if (uiState.voiceStatus is VoiceStatus.Processing) {
-                            Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
-                        } else {
-                            when (voiceInputMode) {
-                                VoiceInputMode.SYSTEM -> {
-                                    try {
-                                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                                    } catch (_: ActivityNotFoundException) {
-                                        if (viewModel.isCloudVoiceConfigured()) {
-                                            Toast.makeText(
-                                                context,
-                                                "系统语音不可用，已回退到 Azure 云端录音",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                            startCloudRecordingWithPermissionGuard()
-                                        } else {
-                                            Toast.makeText(
-                                                context,
-                                                "当前设备没有可用的系统语音识别入口",
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    }
-                                }
-                                VoiceInputMode.CLOUD -> {
-                                    startCloudRecordingWithPermissionGuard()
-                                }
-                                VoiceInputMode.UNAVAILABLE -> {
-                                    Toast.makeText(
-                                        context,
-                                        "当前既没有可用的系统语音识别，也没有配置 Azure 语音。请安装系统语音服务或到设置页填写 Azure 语音 Deployment。",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
-                        }
-                    }) {
-                        Icon(
-                            Icons.Default.Mic,
-                            contentDescription = if (isRecording) "结束录音" else "语音输入",
-                            tint = if (isRecording) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary
-                        )
-                    }
                     IconButton(onClick = {
                         Toast.makeText(navController.context, "📷 拍照记账 · 敬请期待", Toast.LENGTH_SHORT).show()
                     }) {
@@ -508,7 +472,7 @@ fun HomeScreen(
                 when {
                     isRecording -> {
                         Text(
-                            text = "🎙 正在录音，再点一次麦克风结束",
+                            text = "🎙 正在录音，再点一次按钮结束",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(bottom = 8.dp)
@@ -532,31 +496,43 @@ fun HomeScreen(
                     }
                 }
 
-                Button(
-                    onClick = {
-                        if (aiInput.isNotBlank()) {
-                            viewModel.submitAiInput(aiInput)
+                // Unified AI button: tap = submit, long-press = voice input
+                AiActionButton(
+                    aiInput = aiInput,
+                    isRecording = isRecording,
+                    aiStatus = uiState.aiStatus,
+                    voiceStatus = uiState.voiceStatus,
+                    voiceInputMode = voiceInputMode,
+                    onSubmit = { viewModel.submitAiInput(aiInput) },
+                    onVoiceToggle = {
+                        if (uiState.voiceStatus is VoiceStatus.Processing) {
+                            Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
+                        } else if (isRecording) {
+                            stopCloudRecording()
+                        } else {
+                            when (voiceInputMode) {
+                                VoiceInputMode.SYSTEM -> {
+                                    try {
+                                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                                    } catch (_: ActivityNotFoundException) {
+                                        if (viewModel.isCloudVoiceConfigured()) {
+                                            Toast.makeText(context, "系统语音不可用，已回退到 Azure 云端录音", Toast.LENGTH_SHORT).show()
+                                            startCloudRecordingWithPermissionGuard()
+                                        } else {
+                                            Toast.makeText(context, "当前设备没有可用的系统语音识别入口", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                                VoiceInputMode.CLOUD -> {
+                                    startCloudRecordingWithPermissionGuard()
+                                }
+                                VoiceInputMode.UNAVAILABLE -> {
+                                    Toast.makeText(context, "请安装系统语音服务或到设置页填写 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = aiInput.isNotBlank() &&
-                        uiState.aiStatus !is AiStatus.Processing &&
-                        !isRecording &&
-                        uiState.voiceStatus !is VoiceStatus.Processing
-                ) {
-                    if (uiState.aiStatus is AiStatus.Processing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("识别中...")
-                    } else {
-                        Text("AI 识别并记账", modifier = Modifier.padding(vertical = 4.dp))
                     }
-                }
+                )
 
                 // Show result
                 when (val status = uiState.aiStatus) {
@@ -765,6 +741,112 @@ private fun parseCategoryColor(colorStr: String?): Color {
 private fun Context.hasAudioPermission(): Boolean {
     return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AiActionButton(
+    aiInput: String,
+    isRecording: Boolean,
+    aiStatus: AiStatus,
+    voiceStatus: VoiceStatus,
+    voiceInputMode: VoiceInputMode,
+    onSubmit: () -> Unit,
+    onVoiceToggle: () -> Unit
+) {
+    val isProcessing = aiStatus is AiStatus.Processing || voiceStatus is VoiceStatus.Processing
+    val buttonColor by animateColorAsState(
+        targetValue = when {
+            isRecording -> MaterialTheme.colorScheme.error
+            isProcessing -> MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            else -> MaterialTheme.colorScheme.primary
+        },
+        label = "buttonColor"
+    )
+
+    // Pulsing animation when recording
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
+            )
+            .combinedClickable(
+                onClick = {
+                    when {
+                        isRecording -> onVoiceToggle() // stop recording
+                        aiInput.isNotBlank() && !isProcessing -> onSubmit()
+                        else -> {} // no-op when empty and not recording
+                    }
+                },
+                onLongClick = {
+                    if (!isProcessing) onVoiceToggle()
+                }
+            )
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            when {
+                isRecording -> {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = "录音中",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("🎙 录音中...点击结束", color = Color.White)
+                }
+                aiStatus is AiStatus.Processing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("识别中...", color = Color.White)
+                }
+                voiceStatus is VoiceStatus.Processing -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("语音识别中...", color = Color.White)
+                }
+                else -> {
+                    Text(
+                        "✨ AI 识别并记账",
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+    Text(
+        text = "💡 长按按钮语音输入，点击提交 AI 识别",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp)
+    )
 }
 
 @Preview(showBackground = true)
