@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -537,15 +538,13 @@ fun CaptureScreen(
 
                         // Side-by-side: labels on top, boxes below, buttons at bottom
                         // Determine left label based on how we got here
-                        val leftLabel = if (ocrText.isNotBlank() && extractionResult == null) "📝 OCR 文本" else "📝 识别文本"
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // Left label
                             Text(
-                                text = leftLabel,
+                                text = "📝 识别结果",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f)
@@ -575,8 +574,8 @@ fun CaptureScreen(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(180.dp),
-                                placeholder = { Text("识别文本将显示在这里", style = MaterialTheme.typography.bodySmall) },
+                                    .height(240.dp),
+                                placeholder = { Text("识别结果将显示在这里\n可编辑文本内容", style = MaterialTheme.typography.bodySmall) },
                                 textStyle = MaterialTheme.typography.bodySmall,
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -585,7 +584,7 @@ fun CaptureScreen(
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(180.dp),
+                                    .height(240.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                                 ),
@@ -757,20 +756,15 @@ fun CaptureScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Box(
+                        AsyncImage(
+                            model = imageUri,
+                            contentDescription = "待识别图片",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(200.dp)
+                                .heightIn(max = 320.dp)
                                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = imageUri,
-                                contentDescription = "待识别图片",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
+                            contentScale = ContentScale.Fit
+                        )
                     }
                 } else {
                     Spacer(modifier = Modifier.weight(1f))
