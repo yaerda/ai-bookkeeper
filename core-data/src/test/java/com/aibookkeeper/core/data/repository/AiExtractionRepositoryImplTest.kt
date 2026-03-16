@@ -1,5 +1,6 @@
 package com.aibookkeeper.core.data.repository
 
+import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
 import com.aibookkeeper.core.data.ai.ExtractionStrategyManager
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test
 class AiExtractionRepositoryImplTest {
 
     private lateinit var strategyManager: ExtractionStrategyManager
+    private lateinit var extractionCategoryProvider: ExtractionCategoryProvider
     private lateinit var repository: AiExtractionRepositoryImpl
 
     private val sampleResult = ExtractionResult(
@@ -29,44 +31,55 @@ class AiExtractionRepositoryImplTest {
     @BeforeEach
     fun setUp() {
         strategyManager = mockk()
-        repository = AiExtractionRepositoryImpl(strategyManager)
+        extractionCategoryProvider = mockk()
+        repository = AiExtractionRepositoryImpl(strategyManager, extractionCategoryProvider)
     }
 
     @Test
     fun should_delegateToStrategyManager_when_extractCalled() = runTest {
-        coEvery { strategyManager.extract("午饭50元") } returns Result.success(sampleResult)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns listOf("水果", "餐饮")
+        coEvery {
+            strategyManager.extract("午饭50元", listOf("水果", "餐饮"))
+        } returns Result.success(sampleResult)
 
         val result = repository.extract("午饭50元")
 
         assertTrue(result.isSuccess)
         assertEquals(50.0, result.getOrThrow().amount)
-        coVerify(exactly = 1) { strategyManager.extract("午饭50元") }
+        coVerify(exactly = 1) { strategyManager.extract("午饭50元", listOf("水果", "餐饮")) }
     }
 
     @Test
     fun should_delegateToStrategyManager_when_extractOnlineCalled() = runTest {
-        coEvery { strategyManager.extractOnline("test") } returns Result.success(sampleResult)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns listOf("水果", "餐饮")
+        coEvery {
+            strategyManager.extractOnline("test", listOf("水果", "餐饮"))
+        } returns Result.success(sampleResult)
 
         val result = repository.extractOnline("test")
 
         assertTrue(result.isSuccess)
-        coVerify(exactly = 1) { strategyManager.extractOnline("test") }
+        coVerify(exactly = 1) { strategyManager.extractOnline("test", listOf("水果", "餐饮")) }
     }
 
     @Test
     fun should_delegateToStrategyManager_when_extractFromOcrCalled() = runTest {
-        coEvery { strategyManager.extractFromOcr("ocr text") } returns Result.success(sampleResult)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns listOf("水果", "餐饮")
+        coEvery {
+            strategyManager.extractFromOcr("ocr text", listOf("水果", "餐饮"))
+        } returns Result.success(sampleResult)
 
         val result = repository.extractFromOcr("ocr text")
 
         assertTrue(result.isSuccess)
-        coVerify(exactly = 1) { strategyManager.extractFromOcr("ocr text") }
+        coVerify(exactly = 1) { strategyManager.extractFromOcr("ocr text", listOf("水果", "餐饮")) }
     }
 
     @Test
     fun should_propagateFailure_when_strategyManagerFails() = runTest {
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
         coEvery {
-            strategyManager.extract("bad input")
+            strategyManager.extract("bad input", emptyList())
         } returns Result.failure(RuntimeException("extraction failed"))
 
         val result = repository.extract("bad input")
@@ -76,9 +89,23 @@ class AiExtractionRepositoryImplTest {
     }
 
     @Test
-    fun should_propagateFailure_when_extractOnlineFails() = runTest {
+    fun should_mergeProvidedCategoryNames_before_extracting() = runTest {
+        coEvery { extractionCategoryProvider.getCategoryNames(listOf("水果")) } returns listOf("水果", "餐饮", "工资")
         coEvery {
-            strategyManager.extractOnline("test")
+            strategyManager.extract("草莓18元", listOf("水果", "餐饮", "工资"))
+        } returns Result.success(sampleResult)
+
+        repository.extract("草莓18元", listOf("水果"))
+
+        coVerify { extractionCategoryProvider.getCategoryNames(listOf("水果")) }
+        coVerify { strategyManager.extract("草莓18元", listOf("水果", "餐饮", "工资")) }
+    }
+
+    @Test
+    fun should_propagateFailure_when_extractOnlineFails() = runTest {
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
+        coEvery {
+            strategyManager.extractOnline("test", emptyList())
         } returns Result.failure(RuntimeException("network error"))
 
         val result = repository.extractOnline("test")
@@ -88,8 +115,9 @@ class AiExtractionRepositoryImplTest {
 
     @Test
     fun should_propagateFailure_when_extractFromOcrFails() = runTest {
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
         coEvery {
-            strategyManager.extractFromOcr("ocr")
+            strategyManager.extractFromOcr("ocr", emptyList())
         } returns Result.failure(RuntimeException("ocr error"))
 
         val result = repository.extractFromOcr("ocr")

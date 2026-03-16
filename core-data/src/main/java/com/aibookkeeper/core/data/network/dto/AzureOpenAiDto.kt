@@ -59,3 +59,14 @@ data class AiExtractionDto(
     val note: String? = null,
     val confidence: Float = 0.0f
 )
+
+@Serializable
+data class TranscriptionResponse(
+    val text: String? = null,
+    @SerialName("combinedPhrases") val combinedPhrases: List<CombinedPhrase>? = null
+)
+
+@Serializable
+data class CombinedPhrase(
+    val text: String = ""
+)

@@ -1,7 +1,11 @@
 package com.aibookkeeper.feature.stats.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
 import io.mockk.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
@@ -12,10 +16,24 @@ import org.junit.jupiter.api.Test
 class SettingsViewModelTest {
 
     private val context: Context = mockk(relaxed = true)
+    private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
+    private val legacyPrefs: SharedPreferences = mockk(relaxed = true)
 
     @BeforeEach
     fun setUp() {
         mockkObject(NotificationPermissionHelper)
+        every { context.getSharedPreferences("azure_openai", Context.MODE_PRIVATE) } returns legacyPrefs
+        every { legacyPrefs.getString(any(), any()) } returns null
+        every { secureConfigStore.getEndpoint() } returns ""
+        every { secureConfigStore.getApiKey() } returns ""
+        every { secureConfigStore.getDeployment() } returns ""
+        every { secureConfigStore.getSpeechDeployment() } returns ""
+        every { secureConfigStore.getTextPrompt() } returns ""
+        every { secureConfigStore.isLocalSpeechPreferred() } returns true
+        every { secureConfigStore.setLocalSpeechPreferred(any()) } just Runs
+        every { secureConfigStore.setTextPrompt(any()) } just Runs
+        every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
     }
 
     @AfterEach
@@ -32,7 +50,7 @@ class SettingsViewModelTest {
         every { NotificationPermissionHelper.setNotificationEnabled(context, any()) } just Runs
         every { NotificationPermissionHelper.markPermissionRequested(context) } just Runs
 
-        return SettingsViewModel(context)
+        return SettingsViewModel(context, secureConfigStore, systemSpeechRecognitionManager)
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -74,6 +92,21 @@ class SettingsViewModelTest {
             val state = vm.uiState.value
             assertTrue(state.isPermissionGranted)
             assertFalse(state.isNotificationEnabled)
+        }
+
+        @Test
+        fun should_reflectSystemSpeechAvailability_when_initialized() {
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability(
+                recognizerIntentActivityCount = 1,
+                isRecognitionAvailable = true,
+                voiceRecognitionService = "com.google.android.tts/service"
+            )
+
+            val vm = createViewModel()
+
+            val state = vm.uiState.value
+            assertTrue(state.isSystemSpeechAvailable)
+            assertEquals("com.google.android.tts/service", state.systemSpeechProvider)
         }
     }
 
@@ -249,6 +282,34 @@ class SettingsViewModelTest {
             verify(exactly = 0) {
                 NotificationPermissionHelper.setNotificationEnabled(context, true)
             }
+        }
+    }
+
+    @Nested
+    inner class LocalSpeechPreference {
+
+        @Test
+        fun should_updateState_when_preferLocalSpeechChanged() {
+            val vm = createViewModel()
+
+            vm.setPreferLocalSpeech(false)
+
+            assertFalse(vm.uiState.value.preferLocalSpeech)
+            verify { secureConfigStore.setLocalSpeechPreferred(false) }
+        }
+    }
+
+    @Nested
+    inner class AzurePromptSetting {
+
+        @Test
+        fun should_updateStateAndPersist_when_textPromptChanged() {
+            val vm = createViewModel()
+
+            vm.setAzureTextPrompt("优先把买菜归到食材")
+
+            assertEquals("优先把买菜归到食材", vm.uiState.value.azureTextPrompt)
+            verify { secureConfigStore.setTextPrompt("优先把买菜归到食材") }
         }
     }
 

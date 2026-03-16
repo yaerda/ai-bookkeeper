@@ -1,6 +1,7 @@
 package com.aibookkeeper.feature.input.text
 
 import app.cash.turbine.test
+import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
@@ -365,6 +366,43 @@ class TextInputViewModelTest {
             testDispatcher.scheduler.advanceUntilIdle()
 
             assertTrue(vm.uiState.value is TextInputUiState.Error)
+        }
+    }
+
+    @Nested
+    inner class CategoryEditing {
+
+        @Test
+        fun should_createCategoryWithCustomEmojiIcon_when_addCategoryCalled() = runTest {
+            coEvery { categoryRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.addCategory("食材", "🥬")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                categoryRepository.create(match {
+                    it.name == "食材" &&
+                        it.icon == "🥬" &&
+                        it.type == TransactionType.EXPENSE &&
+                        !it.isSystem
+                })
+            }
+        }
+
+        @Test
+        fun should_fallbackToDefaultTag_when_addCategoryIconIsBlank() = runTest {
+            coEvery { categoryRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.addCategory("食材", "   ")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify {
+                categoryRepository.create(match {
+                    it.icon == CategoryIconMapper.DEFAULT_ICON_KEY
+                })
+            }
         }
     }
 

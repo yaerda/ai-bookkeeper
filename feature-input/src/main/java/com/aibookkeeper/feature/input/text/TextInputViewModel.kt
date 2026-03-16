@@ -1,5 +1,6 @@
 package com.aibookkeeper.feature.input.text
 
+import com.aibookkeeper.core.common.util.CategoryIconMapper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aibookkeeper.core.data.model.Category
@@ -182,12 +183,12 @@ class TextInputViewModel @Inject constructor(
         lastExtractionResult = null
     }
 
-    fun addCategory(name: String) {
+    fun addCategory(name: String, icon: String = CategoryIconMapper.DEFAULT_ICON_KEY) {
         viewModelScope.launch {
             categoryRepository.create(
                 Category(
-                    name = name,
-                    icon = "tag",
+                    name = name.trim(),
+                    icon = normalizeCategoryIcon(icon),
                     color = "#607D8B",
                     type = TransactionType.EXPENSE,
                     isSystem = false
@@ -199,8 +200,14 @@ class TextInputViewModel @Inject constructor(
     fun updateCategory(category: Category, newName: String, newIcon: String) {
         viewModelScope.launch {
             categoryRepository.update(
-                category.copy(name = newName, icon = newIcon)
+                category.copy(
+                    name = newName.trim(),
+                    icon = normalizeCategoryIcon(newIcon)
+                )
             )
         }
     }
+
+    private fun normalizeCategoryIcon(icon: String): String =
+        icon.trim().ifBlank { CategoryIconMapper.DEFAULT_ICON_KEY }
 }

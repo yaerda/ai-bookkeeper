@@ -17,19 +17,25 @@ class ExtractionStrategyManager @Inject constructor(
 ) {
     companion object {
         private const val TAG = "ExtractionStrategy"
+        private val genericExpenseCategories = setOf("餐饮", "购物", "其他")
     }
 
     suspend fun extract(input: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
-        return tryOnlineThenFallback { onlineExtractor.extract(input, categoryNames) }
+        return tryOnlineThenFallback {
+            onlineExtractor.extract(input, categoryNames)
+        }?.preferSemanticCategory(input, categoryNames)
             ?: localExtractor.extract(input, categoryNames)
     }
 
     suspend fun extractOnline(input: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
         return onlineExtractor.extract(input, categoryNames)
+            .preferSemanticCategory(input, categoryNames)
     }
 
     suspend fun extractFromOcr(ocrText: String, categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
-        return tryOnlineThenFallback { onlineExtractor.extractFromOcr(ocrText, categoryNames) }
+        return tryOnlineThenFallback {
+            onlineExtractor.extractFromOcr(ocrText, categoryNames)
+        }?.preferSemanticCategory(ocrText, categoryNames)
             ?: localExtractor.extractFromOcr(ocrText, categoryNames)
     }
 
@@ -50,5 +56,23 @@ class ExtractionStrategyManager @Inject constructor(
             Log.w(TAG, "Online extraction error, falling back to local", e)
             null
         }
+    }
+
+    private fun Result<ExtractionResult>.preferSemanticCategory(
+        input: String,
+        categoryNames: List<String>
+    ): Result<ExtractionResult> = map { result ->
+        if (result.type != "EXPENSE" || result.category !in genericExpenseCategories) {
+            return@map result
+        }
+
+        val preferredCategory = CategorySemanticMatcher.findBestMatchingCategory(input, categoryNames)
+            ?: return@map result
+
+        if (preferredCategory == result.category) {
+            return@map result
+        }
+
+        result.copy(category = preferredCategory)
     }
 }

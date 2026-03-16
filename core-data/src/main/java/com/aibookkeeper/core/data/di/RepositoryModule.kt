@@ -8,6 +8,8 @@ import com.aibookkeeper.core.data.repository.RawEventRepository
 import com.aibookkeeper.core.data.repository.RawEventRepositoryImpl
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionRepositoryImpl
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepositoryImpl
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -41,4 +43,10 @@ abstract class RepositoryModule {
     abstract fun bindRawEventRepository(
         impl: RawEventRepositoryImpl
     ): RawEventRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindVoiceTranscriptionRepository(
+        impl: VoiceTranscriptionRepositoryImpl
+    ): VoiceTranscriptionRepository
 }

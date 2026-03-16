@@ -7,6 +7,7 @@ import com.aibookkeeper.core.data.network.dto.AiExtractionDto
 import com.aibookkeeper.core.data.network.dto.ChatCompletionRequest
 import com.aibookkeeper.core.data.network.dto.ChatMessage
 import com.aibookkeeper.core.data.network.dto.ResponseFormat
+import com.aibookkeeper.core.data.security.SecureConfigStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -20,39 +21,11 @@ import javax.inject.Inject
 class AzureOpenAiExtractor @Inject constructor(
     private val service: AzureOpenAiService,
     private val config: AzureOpenAiConfig,
-    private val json: Json
+    private val json: Json,
+    private val secureConfigStore: SecureConfigStore
 ) : AiExtractor {
 
     companion object {
-        private fun buildSystemPrompt(categoryNames: List<String>): String {
-            val categories = if (categoryNames.isNotEmpty()) {
-                categoryNames.joinToString("|") { "\"$it\"" }
-            } else {
-                "\"餐饮\"|\"交通\"|\"购物\"|\"娱乐\"|\"居住\"|\"医疗\"|\"教育\"|\"通讯\"|\"服饰\"|\"工资\"|\"奖金\"|\"红包\"|\"其他\""
-            }
-            return """
-                你是一个智能记账助手。用户会输入一段描述消费或收入的文字，你需要提取结构化信息并以 JSON 返回。
-                
-                JSON 格式如下（所有字段必须存在，值可以为 null）：
-                {
-                  "amount": 数字或null,
-                  "type": "EXPENSE" 或 "INCOME",
-                  "category": $categories,
-                  "merchant_name": "商家名称或null",
-                  "date": "YYYY-MM-DD 或 null（如果未提及日期）",
-                  "note": "原始描述的简短摘要",
-                  "confidence": 0.0到1.0之间的浮点数，表示你对提取结果的把握程度
-                }
-                
-                规则：
-                1. amount 提取数字金额，去掉货币符号
-                2. type 默认 EXPENSE，只有明确的收入关键词才用 INCOME
-                3. category 必须从上述列表中选择最匹配的，优先选择用户自定义分类
-                4. date 如果用户说"今天"/"昨天"/"前天"/"上周X"/"X月X号"，转换为具体日期
-                5. 只返回 JSON，不要包含任何其他文字
-            """.trimIndent()
-        }
-
         private const val OCR_SYSTEM_PROMPT_SUFFIX = """
             
             注意：以下文字来自 OCR 识别，可能包含识别错误。请尽量修正明显的 OCR 错误后再提取。
@@ -60,10 +33,14 @@ class AzureOpenAiExtractor @Inject constructor(
     }
 
     override suspend fun extract(input: String, categoryNames: List<String>): Result<ExtractionResult> =
-        callAi(input, buildSystemPrompt(categoryNames))
+        callAi(input, AzureOpenAiPromptBuilder.buildSystemPrompt(categoryNames, secureConfigStore.getTextPrompt()))
 
     override suspend fun extractFromOcr(ocrText: String, categoryNames: List<String>): Result<ExtractionResult> =
-        callAi(ocrText, buildSystemPrompt(categoryNames) + OCR_SYSTEM_PROMPT_SUFFIX)
+        callAi(
+            ocrText,
+            AzureOpenAiPromptBuilder.buildSystemPrompt(categoryNames, secureConfigStore.getTextPrompt()) +
+                OCR_SYSTEM_PROMPT_SUFFIX
+        )
 
     private suspend fun callAi(
         userInput: String,
@@ -85,8 +62,9 @@ class AzureOpenAiExtractor @Inject constructor(
                 responseFormat = ResponseFormat(type = "json_object")
             )
 
+            val url = "${config.normalizedEndpoint}/openai/deployments/${config.deployment}/chat/completions?api-version=2025-01-01-preview"
             val response = service.chatCompletions(
-                deployment = config.deployment,
+                url = url,
                 apiKey = config.apiKey,
                 request = request
             )
@@ -94,7 +72,7 @@ class AzureOpenAiExtractor @Inject constructor(
             val content = response.choices.firstOrNull()?.message?.content
                 ?: throw IllegalStateException("Empty AI response")
 
-            val dto = json.decodeFromString<AiExtractionDto>(content)
+            val dto = json.decodeFromString<AiExtractionDto>(normalizeJsonContent(content))
 
             ExtractionResult(
                 amount = dto.amount,
@@ -106,6 +84,28 @@ class AzureOpenAiExtractor @Inject constructor(
                 confidence = dto.confidence,
                 source = ExtractionSource.AZURE_AI
             )
+        }
+    }
+
+    private fun normalizeJsonContent(content: String): String {
+        val trimmed = content.trim()
+        val withoutCodeFence = if (trimmed.startsWith("```")) {
+            trimmed
+                .removePrefix("```json")
+                .removePrefix("```JSON")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+        } else {
+            trimmed
+        }
+
+        val firstBrace = withoutCodeFence.indexOf('{')
+        val lastBrace = withoutCodeFence.lastIndexOf('}')
+        return if (firstBrace >= 0 && lastBrace > firstBrace) {
+            withoutCodeFence.substring(firstBrace, lastBrace + 1)
+        } else {
+            withoutCodeFence
         }
     }
 }

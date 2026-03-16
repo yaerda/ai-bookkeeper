@@ -1,16 +1,29 @@
 package com.aibookkeeper.feature.input.home
 
+import android.app.Activity
+import android.content.Intent
 import app.cash.turbine.test
+import com.aibookkeeper.core.data.ai.AzureOpenAiPromptBuilder
 import com.aibookkeeper.core.data.model.Category
+import com.aibookkeeper.core.data.model.ExtractionResult
+import com.aibookkeeper.core.data.model.ExtractionSource
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.SyncStatus
+import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
+import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
@@ -33,6 +46,10 @@ class HomeViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val aiExtractionRepository: AiExtractionRepository = mockk(relaxed = true)
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
+    private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
 
     private val now = LocalDateTime.now()
     private val currentMonth = YearMonth.now()
@@ -40,6 +57,10 @@ class HomeViewModelTest {
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { secureConfigStore.isLocalSpeechPreferred() } returns true
+        every { secureConfigStore.getTextPrompt() } returns ""
+        every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
+        every { systemSpeechRecognitionManager.extractBestResult(any()) } returns null
     }
 
     @AfterEach
@@ -58,7 +79,14 @@ class HomeViewModelTest {
         every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
         every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
 
-        return HomeViewModel(transactionRepository, categoryRepository)
+        return HomeViewModel(
+            transactionRepository,
+            categoryRepository,
+            aiExtractionRepository,
+            voiceTranscriptionRepository,
+            secureConfigStore,
+            systemSpeechRecognitionManager
+        )
     }
 
     private fun createTransaction(
@@ -122,6 +150,163 @@ class HomeViewModelTest {
             val state = vm.uiState.value
             assertTrue(state.recentTransactions.isEmpty())
             assertTrue(state.expenseCategories.isEmpty())
+        }
+    }
+
+    @Nested
+    inner class VoiceInputRouting {
+
+        @Test
+        fun should_useSystemMode_when_preferLocalEnabled_and_systemSpeechAvailable() {
+            every { secureConfigStore.isLocalSpeechPreferred() } returns true
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability(
+                recognizerIntentActivityCount = 1,
+                isRecognitionAvailable = true
+            )
+
+            val vm = createViewModel()
+
+            assertEquals(VoiceInputMode.SYSTEM, vm.currentVoiceInputMode())
+        }
+
+        @Test
+        fun should_useCloudMode_when_systemSpeechUnavailable_and_cloudConfigured() {
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
+            every { voiceTranscriptionRepository.isConfigured() } returns true
+
+            val vm = createViewModel()
+
+            assertEquals(VoiceInputMode.CLOUD, vm.currentVoiceInputMode())
+        }
+
+        @Test
+        fun should_useSystemMode_when_cloudUnavailable_even_if_preferLocalDisabled() {
+            every { secureConfigStore.isLocalSpeechPreferred() } returns false
+            every { voiceTranscriptionRepository.isConfigured() } returns false
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability(
+                recognizerIntentActivityCount = 1,
+                isRecognitionAvailable = true
+            )
+
+            val vm = createViewModel()
+
+            assertEquals(VoiceInputMode.SYSTEM, vm.currentVoiceInputMode())
+        }
+
+        @Test
+        fun should_useUnavailableMode_when_noSystemSpeech_and_noCloud() {
+            every { secureConfigStore.isLocalSpeechPreferred() } returns true
+            every { voiceTranscriptionRepository.isConfigured() } returns false
+            every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
+
+            val vm = createViewModel()
+
+            assertEquals(VoiceInputMode.UNAVAILABLE, vm.currentVoiceInputMode())
+        }
+
+        @Test
+        fun should_setSuccessStatus_when_systemSpeechReturnsText() = runTest {
+            every { systemSpeechRecognitionManager.extractBestResult(any()) } returns "买菜20元"
+            val vm = createViewModel()
+
+            vm.uiState.test {
+                awaitItem()
+
+                vm.handleSystemVoiceRecognitionResult(Activity.RESULT_OK, mockk<Intent>())
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals(
+                    VoiceStatus.Success("买菜20元"),
+                    awaitItem().voiceStatus
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_resetToIdle_when_systemSpeechCancelled() = runTest {
+            val vm = createViewModel()
+
+            vm.uiState.test {
+                awaitItem()
+                awaitItem()
+
+                vm.handleSystemVoiceRecognitionResult(Activity.RESULT_CANCELED, null)
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                expectNoEvents()
+                assertEquals(VoiceStatus.Idle, vm.uiState.value.voiceStatus)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Nested
+    inner class CloudPromptState {
+
+        @Test
+        fun should_exposeSystemPromptPreview_when_categoriesLoaded() = runTest {
+            val categories = listOf(createCategory(name = "饮料"), createCategory(name = "食材"))
+            val vm = createViewModel(categories = categories)
+
+            vm.uiState.test {
+                awaitItem()
+                val loaded = awaitItem()
+                assertEquals(
+                    AzureOpenAiPromptBuilder.buildBaseSystemPrompt(listOf("饮料", "食材")),
+                    loaded.cloudSystemPrompt
+                )
+                assertEquals("", loaded.customCloudPrompt)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_updateCustomPrompt_when_setCustomCloudPromptCalled() = runTest {
+            val vm = createViewModel()
+
+            vm.uiState.test {
+                awaitItem()
+                awaitItem()
+
+                vm.setCustomCloudPrompt("茶叶优先归到饮料")
+                testDispatcher.scheduler.advanceUntilIdle()
+
+                assertEquals("茶叶优先归到饮料", awaitItem().customCloudPrompt)
+                cancelAndIgnoreRemainingEvents()
+            }
+            verify { secureConfigStore.setTextPrompt("茶叶优先归到饮料") }
+        }
+    }
+
+    @Nested
+    inner class AiInputExtraction {
+
+        @Test
+        fun should_saveHomeAiResult_asTextAiSource_evenWhen_localRuleFallbackWasUsed() = runTest {
+            val category = createCategory(name = "餐饮")
+            val savedTransaction = slot<Transaction>()
+            val extraction = ExtractionResult(
+                amount = 20.0,
+                type = "EXPENSE",
+                category = "餐饮",
+                date = LocalDate.now().toString(),
+                note = "午饭",
+                confidence = 0.62f,
+                source = ExtractionSource.LOCAL_RULE
+            )
+            coEvery { aiExtractionRepository.extract("午饭20", any()) } returns Result.success(extraction)
+            coEvery { transactionRepository.create(capture(savedTransaction)) } returns Result.success(1L)
+
+            val vm = createViewModel(categories = listOf(category))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.submitAiInput("午饭20")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals(TransactionSource.TEXT_AI, savedTransaction.captured.source)
+            assertEquals(0.62f, savedTransaction.captured.aiConfidence)
+            assertEquals("午饭20", savedTransaction.captured.originalInput)
         }
     }
 

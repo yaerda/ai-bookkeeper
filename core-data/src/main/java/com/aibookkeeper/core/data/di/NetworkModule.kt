@@ -38,7 +38,7 @@ object NetworkModule {
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
-                    level = HttpLoggingInterceptor.Level.BODY
+                    level = HttpLoggingInterceptor.Level.BASIC
                 }
             )
             .build()
@@ -54,10 +54,16 @@ object NetworkModule {
         secureStore: SecureConfigStore,
         @Named("azureOpenAiApiKey") buildConfigApiKey: String,
         @Named("azureOpenAiEndpoint") buildConfigEndpoint: String,
-        @Named("azureOpenAiDeployment") buildConfigDeployment: String
+        @Named("azureOpenAiDeployment") buildConfigDeployment: String,
+        @Named("azureOpenAiSpeechDeployment") buildConfigSpeechDeployment: String
     ): AzureOpenAiConfig {
         // Migrate BuildConfig values to encrypted storage on first run
-        secureStore.migrateFromBuildConfig(buildConfigApiKey, buildConfigEndpoint, buildConfigDeployment)
+        secureStore.migrateFromBuildConfig(
+            buildConfigApiKey,
+            buildConfigEndpoint,
+            buildConfigDeployment,
+            buildConfigSpeechDeployment
+        )
 
         // Always read from encrypted storage
         return AzureOpenAiConfig(
@@ -71,16 +77,11 @@ object NetworkModule {
     @Singleton
     @Named("azureRetrofit")
     fun provideAzureRetrofit(
-        config: AzureOpenAiConfig,
         okHttpClient: OkHttpClient,
         json: Json
     ): Retrofit {
-        val baseUrl = config.endpoint.let { ep ->
-            if (ep.isBlank()) "https://placeholder.openai.azure.com/"
-            else if (ep.endsWith("/")) ep else "$ep/"
-        }
         return Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl("https://placeholder.openai.azure.com/")
             .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()

@@ -1,6 +1,7 @@
 package com.aibookkeeper.core.data.ai
 
 import android.util.Log
+import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.entity.CategoryEntity
 import com.aibookkeeper.core.data.model.ExtractionResult
@@ -27,6 +28,7 @@ class NotificationExtractionPipelineTest {
     private lateinit var rawEventRepository: RawEventRepository
     private lateinit var transactionRepository: TransactionRepository
     private lateinit var categoryDao: CategoryDao
+    private lateinit var extractionCategoryProvider: ExtractionCategoryProvider
     private lateinit var pipeline: NotificationExtractionPipeline
 
     private val todayStr = LocalDate.now().toString()
@@ -61,9 +63,10 @@ class NotificationExtractionPipelineTest {
         rawEventRepository = mockk(relaxUnitFun = true)
         transactionRepository = mockk()
         categoryDao = mockk()
+        extractionCategoryProvider = mockk()
 
         pipeline = NotificationExtractionPipeline(
-            strategyManager, rawEventRepository, transactionRepository, categoryDao
+            strategyManager, rawEventRepository, transactionRepository, categoryDao, extractionCategoryProvider
         )
     }
 
@@ -75,13 +78,17 @@ class NotificationExtractionPipelineTest {
     @Test
     fun should_createTransaction_when_notificationProcessedSuccessfully() = runTest {
         coEvery { rawEventRepository.captureEvent("WECHAT_PAY", any()) } returns Result.success(1L)
-        coEvery { strategyManager.extract(any()) } returns Result.success(sampleExtraction)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns listOf("水果", "餐饮")
+        coEvery {
+            strategyManager.extract(any(), listOf("水果", "餐饮"))
+        } returns Result.success(sampleExtraction)
         coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns foodCategory
         coEvery { transactionRepository.create(any<Transaction>()) } returns Result.success(100L)
 
         val txId = pipeline.processNotification("WECHAT_PAY", "微信支付 星巴克咖啡35.5元")
 
         assertEquals(100L, txId)
+        coVerify { strategyManager.extract("微信支付 星巴克咖啡35.5元", listOf("水果", "餐饮")) }
         coVerify { rawEventRepository.markExtracted(1L, 100L) }
     }
 
@@ -92,13 +99,14 @@ class NotificationExtractionPipelineTest {
         val txId = pipeline.processNotification("ALIPAY", "duplicate content")
 
         assertEquals(-1L, txId)
-        coVerify(exactly = 0) { strategyManager.extract(any()) }
+        coVerify(exactly = 0) { strategyManager.extract(any(), any()) }
     }
 
     @Test
     fun should_markFailed_when_extractionFails() = runTest {
         coEvery { rawEventRepository.captureEvent("WECHAT_PAY", any()) } returns Result.success(2L)
-        coEvery { strategyManager.extract(any()) } returns Result.failure(RuntimeException("AI error"))
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
+        coEvery { strategyManager.extract(any(), emptyList()) } returns Result.failure(RuntimeException("AI error"))
 
         val txId = pipeline.processNotification("WECHAT_PAY", "some content")
 
@@ -110,7 +118,8 @@ class NotificationExtractionPipelineTest {
     fun should_setStatusToPending_when_lowConfidence() = runTest {
         val lowConfResult = sampleExtraction.copy(confidence = 0.4f)
         coEvery { rawEventRepository.captureEvent("ALIPAY", any()) } returns Result.success(3L)
-        coEvery { strategyManager.extract(any()) } returns Result.success(lowConfResult)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
+        coEvery { strategyManager.extract(any(), emptyList()) } returns Result.success(lowConfResult)
         coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns foodCategory
         coEvery { transactionRepository.create(any<Transaction>()) } answers {
             val tx = firstArg<Transaction>()
@@ -126,7 +135,8 @@ class NotificationExtractionPipelineTest {
     @Test
     fun should_setStatusToConfirmed_when_highConfidence() = runTest {
         coEvery { rawEventRepository.captureEvent("WECHAT_PAY", any()) } returns Result.success(4L)
-        coEvery { strategyManager.extract(any()) } returns Result.success(sampleExtraction)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns emptyList()
+        coEvery { strategyManager.extract(any(), emptyList()) } returns Result.success(sampleExtraction)
         coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns foodCategory
         coEvery { transactionRepository.create(any<Transaction>()) } answers {
             val tx = firstArg<Transaction>()
@@ -146,12 +156,16 @@ class NotificationExtractionPipelineTest {
             status = "FAILED", retryCount = 1
         )
         coEvery { rawEventRepository.getRetryableEvents() } returns listOf(failedEvent)
-        coEvery { strategyManager.extract("星巴克35元") } returns Result.success(sampleExtraction)
+        coEvery { extractionCategoryProvider.getCategoryNames(emptyList()) } returns listOf("水果", "餐饮")
+        coEvery {
+            strategyManager.extract("星巴克35元", listOf("水果", "餐饮"))
+        } returns Result.success(sampleExtraction)
         coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns foodCategory
         coEvery { transactionRepository.create(any<Transaction>()) } returns Result.success(200L)
 
         pipeline.retryFailedEvents()
 
+        coVerify { strategyManager.extract("星巴克35元", listOf("水果", "餐饮")) }
         coVerify { rawEventRepository.markExtracted(10L, 200L) }
     }
 }

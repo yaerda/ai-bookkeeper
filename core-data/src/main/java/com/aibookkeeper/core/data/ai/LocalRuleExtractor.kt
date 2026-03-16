@@ -13,23 +13,47 @@ import javax.inject.Inject
  */
 class LocalRuleExtractor @Inject constructor() : AiExtractor {
 
-    private val amountPattern = Regex("""(\d+\.?\d*)\s*(元|块|¥)?""")
+    private data class AmountAnalysis(
+        val amount: Double?,
+        val candidateCount: Int,
+        val hasExplicitTotal: Boolean
+    )
+
+    private val amountPattern = Regex("""(\d+(?:\.\d+)?)\s*(元|块|快|¥)?""")
+    private val explicitTotalPatterns = listOf(
+        Regex("""(?:一共|总共|总计|共计|合计|付款|支付|付了|花了|花费|消费|支出|收入|收到|进账|赚了)\s*(\d+(?:\.\d+)?)\s*(元|块|快|¥)?"""),
+        Regex("""(?:一共|总共|总计|共计|合计)[^\d]{0,4}(\d+(?:\.\d+)?)\s*(元|块|快|¥)?""")
+    )
+    private val quantityUnits = listOf(
+        "个", "件", "斤", "公斤", "kg", "g", "瓶", "包", "盒", "杯", "份",
+        "次", "张", "支", "袋", "串", "颗", "只", "台", "双", "桶", "升", "ml", "mL", "l", "L"
+    )
     private val incomeKeywords = listOf("收到", "工资", "奖金", "红包", "收入", "进账")
 
     override suspend fun extract(input: String, categoryNames: List<String>): Result<ExtractionResult> = runCatching {
-        val amount = amountPattern.find(input)?.groupValues?.get(1)?.toDoubleOrNull()
+        val amountAnalysis = analyzeAmount(input)
         val isIncome = incomeKeywords.any { input.contains(it) }
+        val matchedCustomCategory = matchCustomCategory(input, categoryNames)
         val type = if (isIncome) "INCOME" else "EXPENSE"
-        val category = guessCategory(input, isIncome, categoryNames)
-        val date = parseDate(input) ?: LocalDate.now()
+        val category = guessCategory(input, isIncome, matchedCustomCategory)
+        val parsedDate = parseDate(input)
+        val date = parsedDate ?: LocalDate.now()
 
         ExtractionResult(
-            amount = amount,
+            amount = amountAnalysis.amount,
             type = type,
             category = category,
             date = date.toString(),
             note = input,
-            confidence = 0.5f,
+            confidence = calculateConfidence(
+                input = input,
+                amount = amountAnalysis.amount,
+                category = category,
+                hasCustomCategoryMatch = matchedCustomCategory != null,
+                hasParsedDate = parsedDate != null,
+                amountCandidateCount = amountAnalysis.candidateCount,
+                hasExplicitTotal = amountAnalysis.hasExplicitTotal
+            ),
             source = ExtractionSource.LOCAL_RULE
         )
     }
@@ -37,32 +61,48 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
     override suspend fun extractFromOcr(ocrText: String, categoryNames: List<String>): Result<ExtractionResult> =
         extract(ocrText, categoryNames)
 
-    // Common food/grocery item keywords — matched before the generic "买/购" pattern
-    // so that "买芒果", "买牛奶" etc. are categorized as "餐饮" instead of "购物".
-    private val foodItemKeywords = listOf(
-        // Fruits
+    private val fruitKeywords = listOf(
         "芒果", "苹果", "香蕉", "橘子", "橙子", "西瓜", "葡萄", "草莓", "樱桃",
         "桃子", "梨", "柠檬", "荔枝", "龙眼", "榴莲", "火龙果", "猕猴桃", "蓝莓",
-        "柚子", "菠萝", "哈密瓜", "山竹", "百香果", "石榴", "杨梅", "枇杷",
-        // Vegetables
-        "蔬菜", "青菜", "白菜", "番茄", "西红柿", "土豆", "黄瓜", "茄子", "萝卜",
-        "洋葱", "辣椒", "豆腐", "豆芽", "菠菜", "芹菜", "花菜", "西兰花", "玉米",
-        "蘑菇", "木耳",
-        // Meat & protein
-        "猪肉", "牛肉", "羊肉", "鸡肉", "鸡蛋", "鸭肉", "鱼", "虾", "蟹",
-        "排骨", "五花肉", "肉",
-        // Staples & dairy
-        "米", "面粉", "面条", "面包", "馒头", "包子", "饺子", "粽子",
-        "牛奶", "酸奶", "豆浆",
-        // Snacks & drinks
-        "零食", "饼干", "薯片", "巧克力", "糖果", "坚果", "瓜子", "花生",
-        "饮料", "果汁", "可乐", "雪碧", "矿泉水", "茶叶", "啤酒", "酒",
-        // Generic food terms
-        "水果", "食品", "食材", "菜", "早餐", "午餐", "晚餐", "夜宵", "小吃",
-        "烧烤", "火锅", "快餐", "便当", "蛋糕", "甜品", "冰淇淋", "粥",
+        "柚子", "菠萝", "哈密瓜", "山竹", "百香果", "石榴", "杨梅", "枇杷", "小番茄"
     )
 
-    private fun guessCategory(input: String, isIncome: Boolean, customCategories: List<String> = emptyList()): String {
+    private val vegetableKeywords = listOf(
+        "蔬菜", "青菜", "白菜", "番茄", "西红柿", "土豆", "黄瓜", "茄子", "萝卜",
+        "洋葱", "辣椒", "豆腐", "豆芽", "菠菜", "芹菜", "花菜", "西兰花", "玉米",
+        "蘑菇", "木耳"
+    )
+
+    private val proteinKeywords = listOf(
+        "猪肉", "牛肉", "羊肉", "鸡肉", "鸡蛋", "鸭肉", "鱼", "虾", "蟹",
+        "排骨", "五花肉", "肉"
+    )
+
+    private val stapleAndDairyKeywords = listOf(
+        "米", "面粉", "面条", "面包", "馒头", "包子", "饺子", "粽子",
+        "牛奶", "酸奶", "豆浆"
+    )
+
+    private val snackAndDrinkKeywords = listOf(
+        "零食", "饼干", "薯片", "巧克力", "糖果", "坚果", "瓜子", "花生",
+        "饮料", "果汁", "可乐", "雪碧", "矿泉水", "茶叶", "啤酒", "酒"
+    )
+
+    private val genericFoodKeywords = listOf(
+        "水果", "食品", "食材", "菜", "早餐", "午餐", "晚餐", "夜宵", "小吃",
+        "烧烤", "火锅", "快餐", "便当", "蛋糕", "甜品", "冰淇淋", "粥"
+    )
+
+    // Common food/grocery item keywords — matched before the generic "买/购" pattern
+    // so that "买芒果", "买牛奶" etc. are categorized as food-related instead of "购物".
+    private val foodItemKeywords = fruitKeywords +
+        vegetableKeywords +
+        proteinKeywords +
+        stapleAndDairyKeywords +
+        snackAndDrinkKeywords +
+        genericFoodKeywords
+
+    private fun guessCategory(input: String, isIncome: Boolean, matchedCustomCategory: String?): String {
         if (isIncome) {
             return when {
                 input.contains("工资") -> "工资"
@@ -71,10 +111,7 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
                 else -> "其他"
             }
         }
-        // Check custom categories first — user-defined categories take priority
-        for (cat in customCategories) {
-            if (input.contains(cat)) return cat
-        }
+        matchedCustomCategory?.let { return it }
         // Specific categories must be checked before the broad "购物" pattern (买/购)
         return when {
             input.contains("吃") || input.contains("饭") || input.contains("餐") ||
@@ -91,6 +128,83 @@ class LocalRuleExtractor @Inject constructor() : AiExtractor {
             input.contains("买") || input.contains("购") || input.contains("超市") -> "购物"
             else -> "其他"
         }
+    }
+
+    private fun matchCustomCategory(input: String, customCategories: List<String>): String? =
+        CategorySemanticMatcher.findBestMatchingCategory(input, customCategories)
+
+    private fun analyzeAmount(input: String): AmountAnalysis {
+        findExplicitTotalAmount(input)?.let { total ->
+            return AmountAnalysis(amount = total, candidateCount = 1, hasExplicitTotal = true)
+        }
+
+        val candidates = amountPattern.findAll(input)
+            .mapNotNull { match ->
+                val numberGroup = match.groups[1] ?: return@mapNotNull null
+                val value = numberGroup.value.toDoubleOrNull() ?: return@mapNotNull null
+                val unit = match.groups[2]?.value.orEmpty()
+                if (looksLikeDateToken(input, numberGroup.range)) return@mapNotNull null
+                if (unit.isBlank() && looksLikeQuantityToken(input, numberGroup.range)) return@mapNotNull null
+                value
+            }
+            .toList()
+
+        if (candidates.isEmpty()) {
+            return AmountAnalysis(amount = null, candidateCount = 0, hasExplicitTotal = false)
+        }
+
+        val resolvedAmount = if (candidates.size == 1) candidates.first() else candidates.sum()
+        return AmountAnalysis(
+            amount = resolvedAmount,
+            candidateCount = candidates.size,
+            hasExplicitTotal = false
+        )
+    }
+
+    private fun findExplicitTotalAmount(input: String): Double? {
+        explicitTotalPatterns.forEach { pattern ->
+            pattern.find(input)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun looksLikeDateToken(input: String, numberRange: IntRange): Boolean {
+        val previousChar = input.getOrNull(numberRange.first - 1)
+        val nextChar = input.getOrNull(numberRange.last + 1)
+        return previousChar in setOf('年', '月', '-', '/')
+            || nextChar in setOf('年', '月', '日', '号', '-', '/')
+    }
+
+    private fun looksLikeQuantityToken(input: String, numberRange: IntRange): Boolean {
+        val suffix = input.substring((numberRange.last + 1).coerceAtMost(input.length)).trimStart()
+        return quantityUnits.any { suffix.startsWith(it) }
+    }
+
+    private fun calculateConfidence(
+        input: String,
+        amount: Double?,
+        category: String,
+        hasCustomCategoryMatch: Boolean,
+        hasParsedDate: Boolean,
+        amountCandidateCount: Int,
+        hasExplicitTotal: Boolean
+    ): Float {
+        if (amount == null) {
+            return 0.38f
+        }
+
+        var confidence = 0.48f
+        confidence += when {
+            hasExplicitTotal -> 0.12f
+            amountCandidateCount > 1 -> 0.10f
+            amountCandidateCount == 1 -> 0.07f
+            else -> 0f
+        }
+        if (category != "其他") confidence += 0.05f
+        if (hasCustomCategoryMatch) confidence += 0.03f
+        if (hasParsedDate) confidence += 0.02f
+        if (input.length in 2..40) confidence += 0.02f
+        return confidence.coerceIn(0.38f, 0.68f)
     }
 
     // ── Date parsing ────────────────────────────────────────────────────────

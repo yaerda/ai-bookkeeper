@@ -26,4 +26,8 @@ object AppConfigModule {
     @Provides
     @Named("azureOpenAiDeployment")
     fun provideAzureOpenAiDeployment(): String = BuildConfig.AZURE_OPENAI_DEPLOYMENT
+
+    @Provides
+    @Named("azureOpenAiSpeechDeployment")
+    fun provideAzureOpenAiSpeechDeployment(): String = BuildConfig.AZURE_OPENAI_SPEECH_DEPLOYMENT
 }

@@ -5,6 +5,8 @@ package com.aibookkeeper.core.common.util
  * to displayable emoji characters.
  */
 object CategoryIconMapper {
+    const val DEFAULT_ICON_KEY = "tag"
+
     private val iconMap = mapOf(
         "ic_food" to "🍚",
         "ic_transport" to "🚗",
@@ -32,11 +34,21 @@ object CategoryIconMapper {
         "ic_digital" to "💻",
         "ic_gift" to "🎀",
         "ic_repair" to "🔧",
-        "tag" to "🏷️"
+        DEFAULT_ICON_KEY to "🏷️"
     )
 
     /** All available icons for user selection */
     val allIcons: List<Pair<String, String>> = iconMap.toList()
 
-    fun getEmoji(iconName: String?): String = iconMap[iconName] ?: "🏷️"
+    fun isPresetIcon(iconName: String?): Boolean = iconName?.trim()?.let(iconMap::containsKey) == true
+
+    fun getEmoji(iconName: String?): String {
+        val normalizedIcon = iconName?.trim()
+        return when {
+            normalizedIcon.isNullOrEmpty() -> iconMap.getValue(DEFAULT_ICON_KEY)
+            isPresetIcon(normalizedIcon) -> iconMap.getValue(normalizedIcon)
+            normalizedIcon.startsWith("ic_") || normalizedIcon == DEFAULT_ICON_KEY -> iconMap.getValue(DEFAULT_ICON_KEY)
+            else -> normalizedIcon
+        }
+    }
 }

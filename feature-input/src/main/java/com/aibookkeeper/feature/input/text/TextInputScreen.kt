@@ -153,7 +153,7 @@ private fun AiInputSection(
     initialCategoryId: Long? = null,
     onSubmitText: (String) -> Unit,
     onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
-    onAddCategory: (String) -> Unit = {},
+    onAddCategory: (String, String) -> Unit = { _, _ -> },
     onUpdateCategory: (Category, String, String) -> Unit = { _, _, _ -> }
 ) {
     var inputText by remember { mutableStateOf("") }
@@ -163,7 +163,17 @@ private fun AiInputSection(
     var showManualForm by remember(initialCategory) { mutableStateOf(initialCategory != null) }
     var gridSelectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var editingCategory by remember { mutableStateOf<Category?>(null) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
+    var newCategoryPresetIcon by remember { mutableStateOf(CategoryIconMapper.DEFAULT_ICON_KEY) }
+    var newCategoryCustomEmoji by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun resetNewCategoryDraft() {
+        newCategoryName = ""
+        newCategoryPresetIcon = CategoryIconMapper.DEFAULT_ICON_KEY
+        newCategoryCustomEmoji = ""
+    }
 
     // AI text input
     Text(
@@ -263,22 +273,63 @@ private fun AiInputSection(
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    // Manual form toggle
-    TextButton(
-        onClick = { showManualForm = !showManualForm },
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(if (showManualForm) "收起手动输入" else "手动输入")
+        TextButton(
+            onClick = { showManualForm = !showManualForm },
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(if (showManualForm) "收起手动输入" else "手动输入")
+        }
+        OutlinedButton(
+            onClick = { showAddCategoryDialog = true },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("＋ 新增分类")
+        }
     }
 
     AnimatedVisibility(visible = showManualForm) {
         ManualInputForm(
             categories = categories,
             onSave = onManualSave,
-            onAddCategory = onAddCategory,
+            onOpenAddCategoryDialog = { showAddCategoryDialog = true },
             initialCategory = gridSelectedCategory
+        )
+    }
+
+    if (showAddCategoryDialog) {
+        AddCategoryDialog(
+            name = newCategoryName,
+            presetIcon = newCategoryPresetIcon,
+            customEmoji = newCategoryCustomEmoji,
+            onNameChange = { if (it.length <= 6) newCategoryName = it },
+            onPresetIconSelected = { iconKey ->
+                newCategoryPresetIcon = iconKey
+                newCategoryCustomEmoji = ""
+            },
+            onCustomEmojiChange = { emoji ->
+                if (emoji.length <= 16) {
+                    newCategoryCustomEmoji = emoji
+                }
+            },
+            onDismiss = {
+                showAddCategoryDialog = false
+                resetNewCategoryDraft()
+            },
+            onConfirm = {
+                onAddCategory(
+                    newCategoryName,
+                    resolveCategoryIcon(newCategoryPresetIcon, newCategoryCustomEmoji)
+                )
+                showAddCategoryDialog = false
+                resetNewCategoryDraft()
+            }
         )
     }
 
@@ -300,16 +351,13 @@ private fun AiInputSection(
 private fun ManualInputForm(
     categories: List<Category>,
     onSave: (Double, Long?, String, String?, TransactionType) -> Unit,
-    onAddCategory: (String) -> Unit = {},
+    onOpenAddCategoryDialog: () -> Unit = {},
     initialCategory: Category? = null
 ) {
     var amountText by remember { mutableStateOf("") }
     var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var note by remember { mutableStateOf("") }
     var isExpense by remember { mutableStateOf(true) }
-
-    var showAddCategoryDialog by remember { mutableStateOf(false) }
-    var newCategoryName by remember { mutableStateOf("") }
 
     Card(
         modifier = Modifier
@@ -382,7 +430,7 @@ private fun ManualInputForm(
                 // Add custom category button
                 FilterChip(
                     selected = false,
-                    onClick = { showAddCategoryDialog = true },
+                    onClick = onOpenAddCategoryDialog,
                     label = { Text("＋ 新分类") }
                 )
             }
@@ -416,37 +464,48 @@ private fun ManualInputForm(
             }
         }
     }
+}
 
-    if (showAddCategoryDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showAddCategoryDialog = false; newCategoryName = "" },
-            title = { Text("添加新分类") },
-            text = {
-                OutlinedTextField(
-                    value = newCategoryName,
-                    onValueChange = { if (it.length <= 6) newCategoryName = it },
-                    label = { Text("分类名称（最多6字符）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+@Composable
+private fun AddCategoryDialog(
+    name: String,
+    presetIcon: String,
+    customEmoji: String,
+    onNameChange: (String) -> Unit,
+    onPresetIconSelected: (String) -> Unit,
+    onCustomEmojiChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加新分类") },
+        text = {
+            Column {
+                CategoryNameAndEmojiFields(
+                    name = name,
+                    onNameChange = onNameChange,
+                    customEmoji = customEmoji,
+                    onCustomEmojiChange = onCustomEmojiChange
                 )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (newCategoryName.isNotBlank()) {
-                            onAddCategory(newCategoryName)
-                            showAddCategoryDialog = false
-                            newCategoryName = ""
-                        }
-                    },
-                    enabled = newCategoryName.isNotBlank()
-                ) { Text("添加") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddCategoryDialog = false; newCategoryName = "" }) { Text("取消") }
+                Spacer(modifier = Modifier.height(12.dp))
+                CategoryIconEditor(
+                    presetIcon = presetIcon,
+                    customEmoji = customEmoji,
+                    onPresetIconSelected = onPresetIconSelected
+                )
             }
-        )
-    }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = name.isNotBlank()
+            ) { Text("添加") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
@@ -720,49 +779,52 @@ private fun EditCategoryDialog(
     onConfirm: (name: String, icon: String) -> Unit
 ) {
     var name by remember { mutableStateOf(category.name) }
-    var selectedIcon by remember { mutableStateOf(category.icon) }
+    var presetIcon by remember {
+        mutableStateOf(
+            if (CategoryIconMapper.isPresetIcon(category.icon)) category.icon
+            else CategoryIconMapper.DEFAULT_ICON_KEY
+        )
+    }
+    var customEmoji by remember {
+        mutableStateOf(
+            if (CategoryIconMapper.isPresetIcon(category.icon)) ""
+            else category.icon
+        )
+    }
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("编辑分类") },
         text = {
             Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { if (it.length <= 6) name = it },
-                    label = { Text("分类名称（最多6字符）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("选择图标", style = MaterialTheme.typography.labelLarge)
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    CategoryIconMapper.allIcons.forEach { (iconKey, emoji) ->
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (selectedIcon == iconKey)
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent
-                                )
-                                .clickable { selectedIcon = iconKey },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(text = emoji, fontSize = 20.sp)
+                CategoryNameAndEmojiFields(
+                    name = name,
+                    onNameChange = { if (it.length <= 6) name = it },
+                    customEmoji = customEmoji,
+                    onCustomEmojiChange = { emoji ->
+                        if (emoji.length <= 16) {
+                            customEmoji = emoji
                         }
                     }
-                }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                CategoryIconEditor(
+                    presetIcon = presetIcon,
+                    customEmoji = customEmoji,
+                    onPresetIconSelected = { iconKey ->
+                        presetIcon = iconKey
+                        customEmoji = ""
+                    }
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (name.isNotBlank()) onConfirm(name, selectedIcon) },
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onConfirm(name, resolveCategoryIcon(presetIcon, customEmoji))
+                    }
+                },
                 enabled = name.isNotBlank()
             ) { Text("保存") }
         },
@@ -771,6 +833,93 @@ private fun EditCategoryDialog(
         }
     )
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryIconEditor(
+    presetIcon: String,
+    customEmoji: String,
+    onPresetIconSelected: (String) -> Unit
+) {
+    val selectedIcon = resolveCategoryIcon(presetIcon, customEmoji)
+
+    Text("选择图标", style = MaterialTheme.typography.labelLarge)
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = CategoryIconMapper.getEmoji(selectedIcon), fontSize = 20.sp)
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "也可以在上面的 Emoji 框直接输入自定义图标",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        CategoryIconMapper.allIcons.forEach { (iconKey, emoji) ->
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (customEmoji.isBlank() && presetIcon == iconKey)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else Color.Transparent
+                    )
+                    .clickable { onPresetIconSelected(iconKey) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = emoji, fontSize = 20.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryNameAndEmojiFields(
+    name: String,
+    onNameChange: (String) -> Unit,
+    customEmoji: String,
+    onCustomEmojiChange: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        OutlinedTextField(
+            value = customEmoji,
+            onValueChange = onCustomEmojiChange,
+            label = { Text("Emoji") },
+            placeholder = { Text("🥬") },
+            singleLine = true,
+            modifier = Modifier.width(92.dp)
+        )
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            label = { Text("分类名称（最多6字符）") },
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+private fun resolveCategoryIcon(presetIcon: String, customEmoji: String): String =
+    customEmoji.trim().ifBlank { presetIcon }
 
 private fun parseCategoryColor(colorStr: String?): Color {
     if (colorStr.isNullOrBlank()) return Color(0xFF607D8B)

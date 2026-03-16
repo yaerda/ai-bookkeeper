@@ -144,6 +144,48 @@ class LocalRuleExtractorTest {
         assertEquals("其他", result.category)
     }
 
+    @Test
+    fun should_matchCustomFruitCategory_when_inputContainsFruitKeyword() = runTest {
+        val result = extractor.extract("草莓18元", listOf("水果", "餐饮")).getOrThrow()
+        assertEquals("水果", result.category)
+    }
+
+    @Test
+    fun should_matchCustomFruitCategory_when_inputContainsCherryTomatoKeyword() = runTest {
+        val result = extractor.extract("小番茄12元", listOf("水果", "餐饮")).getOrThrow()
+        assertEquals("水果", result.category)
+    }
+
+    @Test
+    fun should_matchCustomIngredientCategory_when_inputContainsVegetableKeyword() = runTest {
+        val result = extractor.extract("空心菜12元", listOf("食材", "餐饮")).getOrThrow()
+        assertEquals("食材", result.category)
+    }
+
+    @Test
+    fun should_matchSpecificVegetableCategory_beforeGenericIngredientCategory() = runTest {
+        val result = extractor.extract("空心菜12元", listOf("食材", "蔬菜", "餐饮")).getOrThrow()
+        assertEquals("蔬菜", result.category)
+    }
+
+    @Test
+    fun should_keepDiningCategory_when_inputLooksLikePreparedDish() = runTest {
+        val result = extractor.extract("空心菜炒牛肉20元", listOf("食材", "餐饮")).getOrThrow()
+        assertEquals("餐饮", result.category)
+    }
+
+    @Test
+    fun should_matchCustomDrinkCategory_when_inputContainsTeaKeyword() = runTest {
+        val result = extractor.extract("茶叶88元", listOf("饮料", "餐饮")).getOrThrow()
+        assertEquals("饮料", result.category)
+    }
+
+    @Test
+    fun should_matchCustomDrinkCategory_when_inputContainsMilkTeaKeyword() = runTest {
+        val result = extractor.extract("奶茶18元", listOf("饮料", "餐饮")).getOrThrow()
+        assertEquals("饮料", result.category)
+    }
+
     // ── Income category ──
 
     @Test
@@ -183,9 +225,9 @@ class LocalRuleExtractorTest {
     }
 
     @Test
-    fun should_setConfidenceTo05_when_extracting() = runTest {
+    fun should_calculateNonDefaultConfidence_when_extracting() = runTest {
         val result = extractor.extract("午饭20").getOrThrow()
-        assertEquals(0.5f, result.confidence)
+        assertEquals(0.62f, result.confidence)
     }
 
     @Test
@@ -336,10 +378,15 @@ class LocalRuleExtractorTest {
     // ── Edge cases ──
 
     @Test
-    fun should_extractFirstAmount_when_multipleNumbersPresent() = runTest {
+    fun should_preferExplicitTotal_when_quantityAndTotalAreBothPresent() = runTest {
         val result = extractor.extract("买了3个苹果一共15元").getOrThrow()
-        // regex finds first match: "3" (from "3个")
-        assertEquals(3.0, result.amount)
+        assertEquals(15.0, result.amount)
+    }
+
+    @Test
+    fun should_sumMultipleLineItemAmounts_when_sameLineContainsMoreThanOneAmount() = runTest {
+        val result = extractor.extract("奶茶10咖啡20").getOrThrow()
+        assertEquals(30.0, result.amount)
     }
 
     @Test
