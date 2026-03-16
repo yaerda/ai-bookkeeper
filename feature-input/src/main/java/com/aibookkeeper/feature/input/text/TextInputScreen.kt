@@ -898,7 +898,7 @@ private fun CategoryNameAndEmojiFields(
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
+        verticalAlignment = Alignment.CenterVertically
     ) {
         OutlinedTextField(
             value = customEmoji,
