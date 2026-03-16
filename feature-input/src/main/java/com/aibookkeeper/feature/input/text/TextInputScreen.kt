@@ -62,6 +62,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -172,7 +174,7 @@ fun TextInputScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AiInputSection(
     navController: NavController,
@@ -444,15 +446,8 @@ private fun AiInputSection(
                 viewModel.isCloudVoiceConfigured() -> {
                     startCloudRecordingWithPermissionGuard()
                 }
-                voiceInputMode == VoiceInputMode.SYSTEM -> {
-                    try {
-                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                    } catch (_: ActivityNotFoundException) {
-                        Toast.makeText(context, "系统语音不可用", Toast.LENGTH_SHORT).show()
-                    }
-                }
                 else -> {
-                    Toast.makeText(context, "请到设置页配置 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "请到设置页配置 Azure 语音服务", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -506,7 +501,7 @@ private fun AiInputSection(
         ) {
             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text(if (showManualForm) "收起手动输入" else "手动输入")
+            Text(if (showManualForm) "收起手动输入" else "✏️ 手动输入")
         }
         OutlinedButton(
             onClick = { showAddCategoryDialog = true },
@@ -517,13 +512,42 @@ private fun AiInputSection(
         }
     }
 
-    AnimatedVisibility(visible = showManualForm) {
-        ManualInputForm(
-            categories = categories,
-            onSave = onManualSave,
-            onOpenAddCategoryDialog = { showAddCategoryDialog = true },
-            initialCategory = gridSelectedCategory
-        )
+    if (showManualForm) {
+        Dialog(
+            onDismissRequest = { showManualForm = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("手动记账") },
+                        navigationIcon = {
+                            IconButton(onClick = { showManualForm = false }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                        }
+                    )
+                }
+            ) { innerPadding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(horizontal = 16.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ManualInputForm(
+                        categories = categories,
+                        onSave = { amount, catId, catName, note, type ->
+                            onManualSave(amount, catId, catName, note, type)
+                            showManualForm = false
+                        },
+                        onOpenAddCategoryDialog = { showAddCategoryDialog = true },
+                        initialCategory = gridSelectedCategory
+                    )
+                }
+            }
+        }
     }
 
     if (showAddCategoryDialog) {

@@ -51,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,7 +91,8 @@ import android.util.Base64
 @Composable
 fun CaptureScreen(
     navController: NavController,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    autoAction: String? = null
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
@@ -240,6 +242,15 @@ fun CaptureScreen(
     fun launchFile() = switchImageWithConfirm {
         clearAll()
         fileLauncher.launch("image/*")
+    }
+
+    // Auto-trigger action when navigated with ?action= parameter
+    LaunchedEffect(autoAction) {
+        when (autoAction) {
+            "camera" -> doLaunchCamera()
+            "gallery" -> galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            "file" -> fileLauncher.launch("image/*")
+        }
     }
 
     fun runAiFromText(text: String) {
