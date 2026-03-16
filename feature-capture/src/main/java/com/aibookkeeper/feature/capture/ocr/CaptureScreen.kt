@@ -452,7 +452,7 @@ fun CaptureScreen(
 
     // Success "返回" goes to Home directly
     fun navigateBackToHome() {
-        navController.popBackStack()
+        navController.popBackStack("home", inclusive = false)
     }
 
     @Composable

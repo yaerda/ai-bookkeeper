@@ -377,23 +377,26 @@ private fun AiInputSection(
             .padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        OutlinedButton(
+        Button(
             onClick = { navController.navigate("capture/camera") },
             modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
-            Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("拍照记账", style = MaterialTheme.typography.labelMedium)
+            Text("📷 拍照", style = MaterialTheme.typography.labelMedium)
         }
         OutlinedButton(
             onClick = { navController.navigate("capture/camera") },
             modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
-            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("文件上传", style = MaterialTheme.typography.labelMedium)
+            Text("🖼️ 相册", style = MaterialTheme.typography.labelMedium)
+        }
+        OutlinedButton(
+            onClick = { navController.navigate("capture/camera") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text("📁 文件", style = MaterialTheme.typography.labelMedium)
         }
     }
 
@@ -531,7 +534,7 @@ private fun AiInputSection(
             onNameChange = { if (it.length <= 6) newCategoryName = it },
             onPresetIconSelected = { iconKey ->
                 newCategoryPresetIcon = iconKey
-                newCategoryCustomEmoji = ""
+                newCategoryCustomEmoji = CategoryIconMapper.getEmoji(iconKey)
             },
             onCustomEmojiChange = { emoji ->
                 if (emoji.length <= 16) {
@@ -1032,7 +1035,7 @@ private fun EditCategoryDialog(
                     customEmoji = customEmoji,
                     onPresetIconSelected = { iconKey ->
                         presetIcon = iconKey
-                        customEmoji = ""
+                        customEmoji = CategoryIconMapper.getEmoji(iconKey)
                     }
                 )
             }
