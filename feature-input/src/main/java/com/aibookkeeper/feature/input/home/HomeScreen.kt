@@ -333,7 +333,7 @@ fun HomeScreen(
                         .animateContentSize(),
                     shape = RoundedCornerShape(16.dp),
                     maxLines = 5,
-                    minLines = 1
+                    minLines = 3
                 )
 
                 // Action buttons row: camera, upload (mic removed — merged into AI button)
