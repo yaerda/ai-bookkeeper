@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -309,10 +310,12 @@ fun HomeScreen(
                     value = aiInput,
                     onValueChange = { aiInput = it },
                     placeholder = { Text("每行一笔，如：\n买芒果28块\n打车15元") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(),
                     shape = RoundedCornerShape(16.dp),
                     maxLines = 5,
-                    minLines = 2
+                    minLines = 1
                 )
 
                 // Action buttons row: camera, upload (mic removed — merged into AI button)
