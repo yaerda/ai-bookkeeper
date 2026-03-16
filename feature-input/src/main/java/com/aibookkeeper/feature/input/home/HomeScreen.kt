@@ -614,12 +614,7 @@ private fun AiActionButton(
             .fillMaxWidth()
             .scale(pulseScale)
             .clip(RoundedCornerShape(12.dp))
-            .background(
-                if (!hasInput && !isRecording && !isProcessing)
-                    buttonColor.copy(alpha = 0.5f)
-                else
-                    buttonColor
-            )
+            .background(buttonColor)
             .pointerInput(isProcessing) {
                 if (isProcessing) return@pointerInput
                 awaitEachGesture {
