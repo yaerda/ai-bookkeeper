@@ -100,6 +100,22 @@ data class AiExtractionDto(
     val confidence: Float = 0.0f
 )
 
+/**
+ * Extended vision extraction DTO — AI returns formatted text + summary + individual items.
+ */
+@Serializable
+data class VisionExtractionDto(
+    @SerialName("formatted_text") val formattedText: String = "",
+    val amount: Double? = null,
+    val type: String = "EXPENSE",
+    val category: String = "其他",
+    @SerialName("merchant_name") val merchantName: String? = null,
+    val date: String? = null,
+    val note: String? = null,
+    val confidence: Float = 0.0f,
+    val items: List<AiExtractionDto> = emptyList()
+)
+
 @Serializable
 data class TranscriptionResponse(
     val text: String? = null,

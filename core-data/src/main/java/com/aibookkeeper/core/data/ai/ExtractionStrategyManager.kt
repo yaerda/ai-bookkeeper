@@ -3,6 +3,7 @@ package com.aibookkeeper.core.data.ai
 import android.util.Log
 import com.aibookkeeper.core.common.constants.AppConstants
 import com.aibookkeeper.core.data.model.ExtractionResult
+import com.aibookkeeper.core.data.model.VisionExtractionResult
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
@@ -41,6 +42,10 @@ class ExtractionStrategyManager @Inject constructor(
 
     suspend fun extractFromImage(imageBase64: String, mimeType: String = "image/jpeg", categoryNames: List<String> = emptyList()): Result<ExtractionResult> {
         return onlineExtractor.extractFromImage(imageBase64, mimeType, categoryNames)
+    }
+
+    suspend fun extractFromImageDetailed(imageBase64: String, mimeType: String = "image/jpeg", categoryNames: List<String> = emptyList()): Result<VisionExtractionResult> {
+        return onlineExtractor.extractFromImageDetailed(imageBase64, mimeType, categoryNames)
     }
 
     val isAiConfigured: Boolean get() = onlineExtractor.isConfigured

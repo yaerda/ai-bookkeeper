@@ -7,13 +7,16 @@ object AzureOpenAiPromptBuilder {
         "工资", "奖金", "红包", "其他"
     )
 
-    fun buildBaseSystemPrompt(categoryNames: List<String>): String {
-        val categories = (categoryNames + defaultCategories)
+    private fun categoriesString(categoryNames: List<String>): String =
+        (categoryNames + defaultCategories)
             .asSequence()
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
             .joinToString("|") { "\"$it\"" }
+
+    fun buildBaseSystemPrompt(categoryNames: List<String>): String {
+        val categories = categoriesString(categoryNames)
 
         return """
             你是一个智能记账助手。用户会输入一段描述消费或收入的文字，你需要提取结构化信息并以 JSON 返回。
@@ -41,6 +44,53 @@ object AzureOpenAiPromptBuilder {
              9. date 如果用户说"今天"/"昨天"/"前天"/"上周X"/"X月X号"，转换为具体日期
              10. 只返回 JSON，不要包含任何其他文字
         """.trimIndent()
+    }
+
+    fun buildVisionSystemPrompt(categoryNames: List<String>, customPrompt: String): String {
+        val categories = categoriesString(categoryNames)
+
+        val base = """
+            你是一个智能记账助手。用户发送一张图片（支付截图、购物小票、外卖订单等），你需要识别图片内容并以 JSON 返回。
+
+            JSON 格式如下：
+            {
+              "formatted_text": "从图片中识别出的内容，整理为易读的文字。如有多个商品/项目，每项单独一行，格式为'商品名 ¥金额'",
+              "amount": 总金额数字,
+              "type": "EXPENSE" 或 "INCOME",
+              "category": $categories,
+              "merchant_name": "商家名称或null",
+              "date": "YYYY-MM-DD 或 null",
+              "note": "简短摘要",
+              "confidence": 0.0-1.0,
+              "items": [
+                {
+                  "amount": 单项金额,
+                  "type": "EXPENSE" 或 "INCOME",
+                  "category": "从候选分类中选择",
+                  "merchant_name": "商家名称或null",
+                  "date": "YYYY-MM-DD 或 null",
+                  "note": "该项商品描述",
+                  "confidence": 0.0-1.0
+                }
+              ]
+            }
+
+            规则：
+            1. formatted_text：将图片中的关键消费/收入信息整理为干净的文字，去除无关内容（订单号、手机号等）。多个商品时每个一行，格式为"商品名 ¥金额"
+            2. amount：所有项目的总金额。如果图片中有"合计/总计/实付"等，优先使用
+            3. items：将每个可区分的商品/项目作为一个独立条目。如果只有一笔消费，items 只含一个元素
+            4. 每个 item 的 category 独立判断，可能不同（如超市小票中有食品也有日用品）
+            5. category 必须从候选列表中选择最匹配的
+            6. 忽略无关数字（订单号、手机号、时间戳等），只关注实际支付/收入金额
+            7. type 默认 EXPENSE，只有明确收入关键词才用 INCOME
+            8. date 如果图片中有日期，转换为 YYYY-MM-DD 格式
+            9. confidence 反映真实把握度
+            10. 只返回 JSON，不要包含任何其他文字
+        """.trimIndent()
+
+        val normalizedCustomPrompt = customPrompt.trim()
+        return if (normalizedCustomPrompt.isBlank()) base
+        else "$base\n\n附加用户自定义规则（高优先级）：\n$normalizedCustomPrompt"
     }
 
     fun buildSystemPrompt(

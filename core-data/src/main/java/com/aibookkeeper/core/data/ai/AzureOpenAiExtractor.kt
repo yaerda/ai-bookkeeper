@@ -2,6 +2,7 @@ package com.aibookkeeper.core.data.ai
 
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
+import com.aibookkeeper.core.data.model.VisionExtractionResult
 import com.aibookkeeper.core.data.network.AzureOpenAiService
 import com.aibookkeeper.core.data.network.dto.AiExtractionDto
 import com.aibookkeeper.core.data.network.dto.ChatCompletionRequest
@@ -11,6 +12,7 @@ import com.aibookkeeper.core.data.network.dto.ImageUrlContent
 import com.aibookkeeper.core.data.network.dto.ResponseFormat
 import com.aibookkeeper.core.data.network.dto.VisionChatCompletionRequest
 import com.aibookkeeper.core.data.network.dto.VisionChatMessageWrapper
+import com.aibookkeeper.core.data.network.dto.VisionExtractionDto
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -129,6 +131,101 @@ class AzureOpenAiExtractor @Inject constructor(
                 note = dto.note,
                 confidence = dto.confidence,
                 source = ExtractionSource.AZURE_AI
+            )
+        }
+    }
+
+    /**
+     * Rich vision extraction: returns formatted text + summary + individual items.
+     */
+    suspend fun extractFromImageDetailed(
+        imageBase64: String,
+        mimeType: String,
+        categoryNames: List<String>
+    ): Result<VisionExtractionResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(config.isConfigured) { "Azure OpenAI is not configured" }
+
+            val todayStr = LocalDate.now().toString()
+            val systemPrompt = AzureOpenAiPromptBuilder.buildVisionSystemPrompt(
+                categoryNames, secureConfigStore.getTextPrompt()
+            ) + "\n今天的日期是 $todayStr。"
+
+            val systemMessage = VisionChatMessageWrapper(
+                role = "system",
+                content = JsonPrimitive(systemPrompt)
+            )
+
+            val userContent = buildJsonArray {
+                add(buildJsonObject {
+                    put("type", "text")
+                    put("text", "请从这张图片中识别并提取消费或收入信息，返回 formatted_text 和 items。")
+                })
+                add(buildJsonObject {
+                    put("type", "image_url")
+                    put("image_url", buildJsonObject {
+                        put("url", "data:$mimeType;base64,$imageBase64")
+                    })
+                })
+            }
+
+            val userMessage = VisionChatMessageWrapper(
+                role = "user",
+                content = userContent
+            )
+
+            val request = VisionChatCompletionRequest(
+                messages = listOf(systemMessage, userMessage),
+                temperature = 0.1,
+                maxTokens = 1024,
+                responseFormat = ResponseFormat(type = "json_object")
+            )
+
+            val url = "${config.normalizedEndpoint}/openai/deployments/${config.deployment}/chat/completions?api-version=2025-01-01-preview"
+            val response = try {
+                service.visionChatCompletions(
+                    url = url,
+                    apiKey = config.apiKey,
+                    request = request
+                )
+            } catch (e: HttpException) {
+                val errorBody = e.response()?.errorBody()?.string() ?: "无详细信息"
+                throw IllegalStateException("HTTP ${e.code()}: $errorBody", e)
+            }
+
+            val content = response.choices.firstOrNull()?.message?.content
+                ?: throw IllegalStateException("Empty AI response")
+
+            val dto = json.decodeFromString<VisionExtractionDto>(normalizeJsonContent(content))
+
+            val summary = ExtractionResult(
+                amount = dto.amount,
+                type = dto.type,
+                category = dto.category,
+                merchantName = dto.merchantName,
+                date = dto.date ?: todayStr,
+                note = dto.note,
+                confidence = dto.confidence,
+                source = ExtractionSource.AZURE_AI
+            )
+
+            val items = dto.items.map { item ->
+                ExtractionResult(
+                    amount = item.amount,
+                    type = item.type,
+                    category = item.category,
+                    merchantName = item.merchantName ?: dto.merchantName,
+                    date = item.date ?: dto.date ?: todayStr,
+                    note = item.note,
+                    confidence = item.confidence,
+                    source = ExtractionSource.AZURE_AI
+                )
+            }
+
+            VisionExtractionResult(
+                formattedText = dto.formattedText,
+                summary = summary,
+                items = items.ifEmpty { listOf(summary) }
             )
         }
     }

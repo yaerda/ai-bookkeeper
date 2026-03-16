@@ -11,9 +11,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -237,6 +240,38 @@ fun CaptureScreen(
         fileLauncher.launch("image/*")
     }
 
+    fun runAiFromText(text: String) {
+        if (text.isBlank()) {
+            errorMessage = "请先进行 OCR 识别"
+            return
+        }
+        if (!strategyManager.isAiConfigured) {
+            errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
+            return
+        }
+        isProcessing = true
+        processingLabel = "AI 正在提取消费信息..."
+        errorMessage = ""
+        extractionResult = null
+        savedMessage = ""
+
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val categoryNames = categoryProvider.getCategoryNames(emptyList())
+                    strategyManager.extractFromOcr(text, categoryNames)
+                }
+            }.onSuccess { result ->
+                isProcessing = false
+                if (result.isSuccess) extractionResult = result.getOrNull()
+                else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+            }.onFailure { throwable ->
+                isProcessing = false
+                errorMessage = throwable.message ?: "提取失败，请重试"
+            }
+        }
+    }
+
     fun runOcrOnly(uri: Uri) {
         isProcessing = true
         processingLabel = "正在 OCR 识别文字..."
@@ -252,9 +287,14 @@ fun CaptureScreen(
         val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
-                isProcessing = false
                 ocrText = visionText.text.trim()
-                if (ocrText.isBlank()) errorMessage = "未识别到文字内容"
+                if (ocrText.isBlank()) {
+                    isProcessing = false
+                    errorMessage = "未识别到文字内容"
+                } else {
+                    // Auto-trigger AI extraction after OCR succeeds
+                    runAiFromText(ocrText)
+                }
             }
             .addOnFailureListener { e ->
                 isProcessing = false
@@ -325,39 +365,6 @@ fun CaptureScreen(
             }.onFailure { throwable ->
                 isProcessing = false
                 errorMessage = throwable.message ?: "识别失败，请重试"
-            }
-        }
-    }
-
-    // Convert OCR text → AI extraction (the arrow button)
-    fun runAiFromText(text: String) {
-        if (text.isBlank()) {
-            errorMessage = "请先进行 OCR 识别"
-            return
-        }
-        if (!strategyManager.isAiConfigured) {
-            errorMessage = "尚未配置 AI 服务，请前往「设置 → Azure OpenAI 配置」中设置 Endpoint 和 Key"
-            return
-        }
-        isProcessing = true
-        processingLabel = "AI 正在提取消费信息..."
-        errorMessage = ""
-        extractionResult = null
-        savedMessage = ""
-
-        coroutineScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val categoryNames = categoryProvider.getCategoryNames(emptyList())
-                    strategyManager.extractFromOcr(text, categoryNames)
-                }
-            }.onSuccess { result ->
-                isProcessing = false
-                if (result.isSuccess) extractionResult = result.getOrNull()
-                else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-            }.onFailure { throwable ->
-                isProcessing = false
-                errorMessage = throwable.message ?: "提取失败，请重试"
             }
         }
     }
@@ -679,7 +686,7 @@ fun CaptureScreen(
                             }
                         }
 
-                        // Bottom row: [全屏编辑] [AI提取→] [✨ AI记账]
+                        // Bottom row: [全屏编辑] [AI提取 arrow] [✨ AI记账]
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -692,13 +699,21 @@ fun CaptureScreen(
                             ) {
                                 Text("全屏编辑", style = MaterialTheme.typography.labelMedium)
                             }
-                            Button(
+                            // Compact "AI提取" button
+                            FilledTonalButton(
                                 onClick = { runAiFromText(ocrText) },
                                 enabled = ocrText.isNotBlank() && !isProcessing,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
+                                modifier = Modifier.weight(0.8f),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                Text("AI提取 →", style = MaterialTheme.typography.labelMedium)
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("AI提取", style = MaterialTheme.typography.labelSmall)
                             }
                             Button(
                                 onClick = { extractionResult?.let { confirmAndSave(it) } },

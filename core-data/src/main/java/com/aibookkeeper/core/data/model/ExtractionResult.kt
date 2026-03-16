@@ -15,6 +15,16 @@ data class ExtractionResult(
     val source: ExtractionSource = ExtractionSource.AZURE_AI
 )
 
+/**
+ * Rich vision extraction result containing AI-formatted text,
+ * a summary result, and individual line items for split mode.
+ */
+data class VisionExtractionResult(
+    val formattedText: String,
+    val summary: ExtractionResult,
+    val items: List<ExtractionResult>
+)
+
 enum class ExtractionSource {
     AZURE_AI,
     LOCAL_RULE
