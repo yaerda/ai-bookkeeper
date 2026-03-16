@@ -398,7 +398,9 @@ fun CaptureScreen(
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
+                    // Try exact match first, then fallback to "其他"
                     val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
+                        ?: categoryDao.findByNameAndType("其他", data.type)?.id
                     val now = java.time.LocalDateTime.now()
                     val parsedDate = try {
                         java.time.LocalDate.parse(data.date).atStartOfDay()
@@ -432,7 +434,6 @@ fun CaptureScreen(
                 val txId = result.getOrElse { -1L }
                 if (txId > 0) {
                     savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
-                    extractionResult = null
                 } else {
                     errorMessage = "保存失败，请重试"
                 }
