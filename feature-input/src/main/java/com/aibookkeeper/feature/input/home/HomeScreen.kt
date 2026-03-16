@@ -99,6 +99,7 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
+    var startWithVoice by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -120,28 +121,53 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            // Alternate icon between Add and Mic every 2 seconds
-            var showMic by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) {
-                while (true) {
-                    kotlinx.coroutines.delay(2000)
-                    showMic = !showMic
-                }
-            }
-            FloatingActionButton(
-                onClick = { showAiSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                androidx.compose.animation.Crossfade(
-                    targetState = showMic,
-                    animationSpec = tween(400),
-                    label = "fabIcon"
-                ) { isMic ->
-                    if (isMic) {
-                        Icon(Icons.Default.Mic, contentDescription = "语音记账")
-                    } else {
-                        Icon(Icons.Default.Add, contentDescription = "AI 记账")
+                // Hint tooltip above FAB
+                Text(
+                    text = "⬆ 上滑语音记账",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                FloatingActionButton(
+                    onClick = { },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            val startY = down.position.y
+                            var dragged = false
+
+                            // Wait for up or drag
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) {
+                                    // Finger lifted
+                                    change.consume()
+                                    if (dragged) {
+                                        // Drag-up completed → open sheet with voice
+                                        startWithVoice = true
+                                        showAiSheet = true
+                                    } else {
+                                        // Simple tap → open sheet normally
+                                        showAiSheet = true
+                                    }
+                                    break
+                                }
+                                val dragDistance = startY - change.position.y
+                                if (dragDistance > 80f) {
+                                    dragged = true
+                                    change.consume()
+                                }
+                            }
+                        }
                     }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "AI 记账")
                 }
             }
         },
@@ -299,6 +325,21 @@ fun HomeScreen(
 
         fun stopListening() {
             speechRecognizer.stopListening()
+        }
+
+        // Auto-start voice recording if opened via drag-up gesture
+        LaunchedEffect(startWithVoice) {
+            if (startWithVoice) {
+                startWithVoice = false
+                val perm = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                    // Small delay to let the sheet animate open
+                    kotlinx.coroutines.delay(500)
+                    startListening()
+                }
+            }
         }
 
         ModalBottomSheet(
