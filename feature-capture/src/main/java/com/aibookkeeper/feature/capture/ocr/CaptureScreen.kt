@@ -102,6 +102,7 @@ fun CaptureScreen(
     val transactionRepository = remember(entryPoint) { entryPoint.transactionRepository() }
     val strategyManager = remember(entryPoint) { entryPoint.extractionStrategyManager() }
     val categoryProvider = remember(entryPoint) { entryPoint.extractionCategoryProvider() }
+    val categoryDao = remember(entryPoint) { entryPoint.categoryDao() }
 
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var ocrText by remember { mutableStateOf("") }
@@ -109,6 +110,7 @@ fun CaptureScreen(
     var processingLabel by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
     var extractionResult by remember { mutableStateOf<ExtractionResult?>(null) }
+    var visionItems by remember { mutableStateOf<List<ExtractionResult>>(emptyList()) }
     var savedMessage by remember { mutableStateOf("") }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -314,17 +316,6 @@ fun CaptureScreen(
         extractionResult = null
         savedMessage = ""
 
-        // Run OCR in parallel so the left box shows recognized text
-        val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrNull()
-        if (inputImage != null) {
-            val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-            recognizer.process(inputImage)
-                .addOnSuccessListener { visionText ->
-                    ocrText = visionText.text.trim()
-                }
-                .addOnCompleteListener { recognizer.close() }
-        }
-
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -356,12 +347,18 @@ fun CaptureScreen(
                     val base64 = Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
                     val mime = "image/jpeg"
                     val categoryNames = categoryProvider.getCategoryNames(emptyList())
-                    strategyManager.extractFromImage(base64, mime, categoryNames)
+                    strategyManager.extractFromImageDetailed(base64, mime, categoryNames)
                 }
             }.onSuccess { result ->
                 isProcessing = false
-                if (result.isSuccess) extractionResult = result.getOrNull()
-                else errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                if (result.isSuccess) {
+                    val visionResult = result.getOrNull()!!
+                    ocrText = visionResult.formattedText
+                    extractionResult = visionResult.summary
+                    visionItems = visionResult.items
+                } else {
+                    errorMessage = "AI 识别失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                }
             }.onFailure { throwable ->
                 isProcessing = false
                 errorMessage = throwable.message ?: "识别失败，请重试"
@@ -372,16 +369,43 @@ fun CaptureScreen(
     fun confirmAndSave(data: ExtractionResult) {
         isProcessing = true
         processingLabel = "正在保存..."
-        val sourceText = ocrText.ifBlank { "AI Vision: image" }
 
         coroutineScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    pipeline.processNotification("OCR", sourceText)
+                    val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
+                    val now = java.time.LocalDateTime.now()
+                    val parsedDate = try {
+                        java.time.LocalDate.parse(data.date).atStartOfDay()
+                    } catch (_: Exception) {
+                        now
+                    }
+
+                    transactionRepository.create(
+                        com.aibookkeeper.core.data.model.Transaction(
+                            amount = data.amount ?: 0.0,
+                            type = com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type),
+                            categoryId = categoryId,
+                            merchantName = data.merchantName,
+                            note = data.note,
+                            originalInput = ocrText.ifBlank { "AI Vision: image" },
+                            date = parsedDate,
+                            createdAt = now,
+                            updatedAt = now,
+                            source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
+                            status = if (data.confidence >= 0.7f)
+                                com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
+                            else
+                                com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
+                            syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
+                            aiConfidence = data.confidence
+                        )
+                    )
                 }
-            }.onSuccess { transactionId ->
+            }.onSuccess { result ->
                 isProcessing = false
-                if (transactionId > 0) {
+                val txId = result.getOrElse { -1L }
+                if (txId > 0) {
                     savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
                     extractionResult = null
                 } else {
@@ -913,4 +937,5 @@ interface CaptureScreenEntryPoint {
     fun transactionRepository(): TransactionRepository
     fun extractionStrategyManager(): ExtractionStrategyManager
     fun extractionCategoryProvider(): ExtractionCategoryProvider
+    fun categoryDao(): com.aibookkeeper.core.data.local.dao.CategoryDao
 }
