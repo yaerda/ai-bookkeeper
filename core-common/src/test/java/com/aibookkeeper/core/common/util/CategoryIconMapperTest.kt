@@ -99,17 +99,22 @@ class CategoryIconMapperTest {
 
         @Test
         fun should_returnDefaultEmoji_when_iconIsNull() {
-            assertEquals("📦", CategoryIconMapper.getEmoji(null))
+            assertEquals("🏷️", CategoryIconMapper.getEmoji(null))
         }
 
         @Test
         fun should_returnDefaultEmoji_when_iconIsUnknown() {
-            assertEquals("📦", CategoryIconMapper.getEmoji("ic_unknown"))
+            assertEquals("🏷️", CategoryIconMapper.getEmoji("ic_unknown"))
         }
 
         @Test
         fun should_returnDefaultEmoji_when_iconIsEmptyString() {
-            assertEquals("📦", CategoryIconMapper.getEmoji(""))
+            assertEquals("🏷️", CategoryIconMapper.getEmoji(""))
+        }
+
+        @Test
+        fun should_returnCustomEmoji_when_iconIsArbitraryEmoji() {
+            assertEquals("🥬", CategoryIconMapper.getEmoji("🥬"))
         }
     }
 }

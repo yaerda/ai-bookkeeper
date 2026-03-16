@@ -1,9 +1,11 @@
 package com.aibookkeeper.feature.input.home
 
+import android.app.Activity
+import android.content.Intent
+import com.aibookkeeper.core.data.ai.AzureOpenAiPromptBuilder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aibookkeeper.core.data.model.Category
-import com.aibookkeeper.core.data.model.ExtractionSource
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
@@ -13,6 +15,8 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
+import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -42,6 +46,8 @@ data class HomeUiState(
     val expenseCategories: List<Category> = emptyList(),
     val currentMonth: YearMonth = YearMonth.now(),
     val isLoading: Boolean = true,
+    val cloudSystemPrompt: String = "",
+    val customCloudPrompt: String = "",
     val aiStatus: AiStatus = AiStatus.Idle,
     val voiceStatus: VoiceStatus = VoiceStatus.Idle
 )
@@ -60,16 +66,25 @@ sealed class VoiceStatus {
     data class Error(val message: String) : VoiceStatus()
 }
 
+enum class VoiceInputMode {
+    SYSTEM,
+    CLOUD,
+    UNAVAILABLE
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
     private val aiExtractionRepository: AiExtractionRepository,
-    private val voiceTranscriptionRepository: VoiceTranscriptionRepository
+    private val voiceTranscriptionRepository: VoiceTranscriptionRepository,
+    private val secureConfigStore: SecureConfigStore,
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager
 ) : ViewModel() {
 
     private val _aiStatus = MutableStateFlow<AiStatus>(AiStatus.Idle)
     private val _voiceStatus = MutableStateFlow<VoiceStatus>(VoiceStatus.Idle)
+    private val _customCloudPrompt = MutableStateFlow(secureConfigStore.getTextPrompt())
 
     private val currentMonth = YearMonth.now()
 
@@ -83,8 +98,9 @@ class HomeViewModel @Inject constructor(
             DataTuple(monthExpense, monthIncome, transactions, categories)
         },
         _aiStatus,
-        _voiceStatus
-    ) { data, aiStatus, voiceStatus ->
+        _voiceStatus,
+        _customCloudPrompt
+    ) { data, aiStatus, voiceStatus, customCloudPrompt ->
 
         val today = LocalDate.now()
         val todayTransactions = data.transactions.filter { it.date.toLocalDate() == today }
@@ -104,6 +120,8 @@ class HomeViewModel @Inject constructor(
             expenseCategories = data.categories,
             currentMonth = currentMonth,
             isLoading = false,
+            cloudSystemPrompt = AzureOpenAiPromptBuilder.buildBaseSystemPrompt(data.categories.map { it.name }),
+            customCloudPrompt = customCloudPrompt,
             aiStatus = aiStatus,
             voiceStatus = voiceStatus
         )
@@ -148,7 +166,7 @@ class HomeViewModel @Inject constructor(
                             date = date.atStartOfDay(),
                             createdAt = LocalDateTime.now(),
                             updatedAt = LocalDateTime.now(),
-                            source = if (result.source == ExtractionSource.AZURE_AI) TransactionSource.TEXT_AI else TransactionSource.MANUAL,
+                            source = TransactionSource.TEXT_AI,
                             status = TransactionStatus.CONFIRMED,
                             syncStatus = SyncStatus.LOCAL,
                             aiConfidence = result.confidence
@@ -173,7 +191,43 @@ class HomeViewModel @Inject constructor(
         _aiStatus.value = AiStatus.Idle
     }
 
+    fun setCustomCloudPrompt(value: String) {
+        secureConfigStore.setTextPrompt(value)
+        _customCloudPrompt.value = value
+    }
+
     fun isCloudVoiceConfigured(): Boolean = voiceTranscriptionRepository.isConfigured()
+
+    fun currentVoiceInputMode(): VoiceInputMode {
+        val systemSpeechAvailable = systemSpeechRecognitionManager.getAvailability().canUseSystemSpeech
+        val cloudConfigured = voiceTranscriptionRepository.isConfigured()
+        val preferLocalSpeech = secureConfigStore.isLocalSpeechPreferred()
+
+        return when {
+            preferLocalSpeech && systemSpeechAvailable -> VoiceInputMode.SYSTEM
+            cloudConfigured -> VoiceInputMode.CLOUD
+            systemSpeechAvailable -> VoiceInputMode.SYSTEM
+            else -> VoiceInputMode.UNAVAILABLE
+        }
+    }
+
+    fun buildSystemVoiceRecognitionIntent(): Intent {
+        return systemSpeechRecognitionManager.buildRecognitionIntent()
+    }
+
+    fun handleSystemVoiceRecognitionResult(resultCode: Int, data: Intent?) {
+        if (resultCode != Activity.RESULT_OK) {
+            _voiceStatus.value = VoiceStatus.Idle
+            return
+        }
+
+        val text = systemSpeechRecognitionManager.extractBestResult(data)
+        _voiceStatus.value = if (text.isNullOrBlank()) {
+            VoiceStatus.Error("未识别到有效语音内容")
+        } else {
+            VoiceStatus.Success(text)
+        }
+    }
 
     fun transcribeVoiceInput(audioFile: java.io.File) {
         viewModelScope.launch {

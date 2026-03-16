@@ -36,6 +36,9 @@ interface CategoryDao {
     @Query("SELECT * FROM categories ORDER BY type, sortOrder ASC")
     fun observeAll(): Flow<List<CategoryEntity>>
 
+    @Query("SELECT * FROM categories ORDER BY type, sortOrder ASC")
+    suspend fun getAllOnce(): List<CategoryEntity>
+
     @Query("SELECT * FROM categories WHERE name = :name AND type = :type LIMIT 1")
     suspend fun findByNameAndType(name: String, type: String): CategoryEntity?
 

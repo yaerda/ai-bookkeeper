@@ -1,12 +1,14 @@
 package com.aibookkeeper.feature.input.home
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +47,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -88,12 +91,12 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
+    var showPromptReview by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.voiceStatus) {
         when (val status = uiState.voiceStatus) {
             is VoiceStatus.Success -> {
                 aiInput = if (aiInput.isBlank()) status.text else "$aiInput\n${status.text}"
-                Toast.makeText(context, "语音已转成文字", Toast.LENGTH_SHORT).show()
                 viewModel.resetVoiceStatus()
             }
             is VoiceStatus.Error -> {
@@ -202,6 +205,16 @@ fun HomeScreen(
         var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
         var recordingFile by remember { mutableStateOf<File?>(null) }
         var isRecording by remember { mutableStateOf(false) }
+        val voiceInputMode = viewModel.currentVoiceInputMode()
+
+        val speechIntentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            viewModel.handleSystemVoiceRecognitionResult(
+                resultCode = result.resultCode,
+                data = result.data
+            )
+        }
 
         fun startCloudRecording() {
             if (!viewModel.isCloudVoiceConfigured()) {
@@ -271,6 +284,19 @@ fun HomeScreen(
             }
         }
 
+        fun startCloudRecordingWithPermissionGuard() {
+            if (context.hasAudioPermission()) {
+                if (isRecording) {
+                    stopCloudRecording()
+                } else {
+                    startCloudRecording()
+                }
+            } else if (!pendingVoiceRequest) {
+                pendingVoiceRequest = true
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
         DisposableEffect(Unit) {
             onDispose {
                 activeRecorder?.let { recorder ->
@@ -286,7 +312,10 @@ fun HomeScreen(
         }
 
         ModalBottomSheet(
-            onDismissRequest = { showAiSheet = false },
+            onDismissRequest = {
+                showPromptReview = false
+                showAiSheet = false
+            },
             sheetState = sheetState
         ) {
             Column(
@@ -321,21 +350,45 @@ fun HomeScreen(
                 ) {
                     IconButton(onClick = {
                         if (uiState.voiceStatus is VoiceStatus.Processing) {
-                            Toast.makeText(context, "正在云端识别，请稍候", Toast.LENGTH_SHORT).show()
-                        } else if (context.hasAudioPermission()) {
-                            if (isRecording) {
-                                stopCloudRecording()
-                            } else {
-                                startCloudRecording()
+                            Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
+                        } else {
+                            when (voiceInputMode) {
+                                VoiceInputMode.SYSTEM -> {
+                                    try {
+                                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
+                                    } catch (_: ActivityNotFoundException) {
+                                        if (viewModel.isCloudVoiceConfigured()) {
+                                            Toast.makeText(
+                                                context,
+                                                "系统语音不可用，已回退到 Azure 云端录音",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            startCloudRecordingWithPermissionGuard()
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "当前设备没有可用的系统语音识别入口",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                }
+                                VoiceInputMode.CLOUD -> {
+                                    startCloudRecordingWithPermissionGuard()
+                                }
+                                VoiceInputMode.UNAVAILABLE -> {
+                                    Toast.makeText(
+                                        context,
+                                        "当前既没有可用的系统语音识别，也没有配置 Azure 语音。请安装系统语音服务或到设置页填写 Azure 语音 Deployment。",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             }
-                        } else if (!pendingVoiceRequest) {
-                            pendingVoiceRequest = true
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }) {
                         Icon(
                             Icons.Default.Mic,
-                            contentDescription = if (isRecording) "结束录音" else "语音",
+                            contentDescription = if (isRecording) "结束录音" else "语音输入",
                             tint = if (isRecording) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.primary
                         )
@@ -349,6 +402,52 @@ fun HomeScreen(
                         Toast.makeText(navController.context, "📁 导入账单 · 敬请期待", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.UploadFile, contentDescription = "上传", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                TextButton(
+                    onClick = { showPromptReview = !showPromptReview },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Text(if (showPromptReview) "收起 AI Prompt Review" else "Review / 修改 AI Prompt")
+                }
+
+                AnimatedVisibility(visible = showPromptReview) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Text(
+                            text = "系统 Prompt（只读）",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        OutlinedTextField(
+                            value = uiState.cloudSystemPrompt,
+                            onValueChange = {},
+                            readOnly = true,
+                            minLines = 4,
+                            maxLines = 8,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Text(
+                            text = "用户自定义 Prompt",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        OutlinedTextField(
+                            value = uiState.customCloudPrompt,
+                            onValueChange = viewModel::setCustomCloudPrompt,
+                            placeholder = { Text("例如：茶叶优先归到饮料，备注保留品牌") },
+                            minLines = 3,
+                            maxLines = 6,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        )
                     }
                 }
 
@@ -366,6 +465,14 @@ fun HomeScreen(
                             text = "☁️ 正在上传录音并进行 Azure 云端识别...",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    voiceInputMode == VoiceInputMode.CLOUD -> {
+                        Text(
+                            text = "☁️ 当前使用 Azure 云端语音识别作为兜底",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }

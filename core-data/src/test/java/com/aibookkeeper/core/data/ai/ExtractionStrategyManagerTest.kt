@@ -195,4 +195,47 @@ class ExtractionStrategyManagerTest {
 
         coVerify { onlineExtractor.extractFromOcr(ocrText) }
     }
+
+    @Test
+    fun should_preferIngredientCategory_when_onlineReturnsGenericFoodCategory() = runTest {
+        val input = "买空心菜12元"
+        val categories = listOf("食材", "餐饮")
+        coEvery {
+            onlineExtractor.extract(input, categories)
+        } returns Result.success(onlineResult.copy(category = "餐饮", note = "空心菜"))
+
+        val result = manager.extract(input, categories).getOrThrow()
+
+        assertEquals("食材", result.category)
+        assertEquals(ExtractionSource.AZURE_AI, result.source)
+        coVerify(exactly = 0) { localExtractor.extract(any(), any()) }
+    }
+
+    @Test
+    fun should_keepDiningCategory_when_onlineResultMatchesPreparedDish() = runTest {
+        val input = "空心菜炒牛肉20元"
+        val categories = listOf("食材", "餐饮")
+        coEvery {
+            onlineExtractor.extract(input, categories)
+        } returns Result.success(onlineResult.copy(category = "餐饮", note = "空心菜炒牛肉"))
+
+        val result = manager.extract(input, categories).getOrThrow()
+
+        assertEquals("餐饮", result.category)
+        assertEquals(ExtractionSource.AZURE_AI, result.source)
+    }
+
+    @Test
+    fun should_preferDrinkCategory_when_onlineReturnsGenericTeaCategory() = runTest {
+        val input = "茶叶88元"
+        val categories = listOf("饮料", "餐饮")
+        coEvery {
+            onlineExtractor.extract(input, categories)
+        } returns Result.success(onlineResult.copy(category = "餐饮", note = "茶叶"))
+
+        val result = manager.extract(input, categories).getOrThrow()
+
+        assertEquals("饮料", result.category)
+        assertEquals(ExtractionSource.AZURE_AI, result.source)
+    }
 }

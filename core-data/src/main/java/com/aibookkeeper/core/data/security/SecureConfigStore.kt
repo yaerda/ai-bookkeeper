@@ -22,6 +22,8 @@ class SecureConfigStore @Inject constructor(
         private const val KEY_AZURE_ENDPOINT = "azure_openai_endpoint"
         private const val KEY_AZURE_DEPLOYMENT = "azure_openai_deployment"
         private const val KEY_AZURE_SPEECH_DEPLOYMENT = "azure_openai_speech_deployment"
+        private const val KEY_AZURE_TEXT_PROMPT = "azure_openai_text_prompt"
+        private const val KEY_PREFER_LOCAL_SPEECH = "prefer_local_speech"
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -60,6 +62,18 @@ class SecureConfigStore @Inject constructor(
 
     fun setSpeechDeployment(deployment: String) {
         prefs.edit().putString(KEY_AZURE_SPEECH_DEPLOYMENT, deployment).apply()
+    }
+
+    fun getTextPrompt(): String = prefs.getString(KEY_AZURE_TEXT_PROMPT, "") ?: ""
+
+    fun setTextPrompt(prompt: String) {
+        prefs.edit().putString(KEY_AZURE_TEXT_PROMPT, prompt).apply()
+    }
+
+    fun isLocalSpeechPreferred(): Boolean = prefs.getBoolean(KEY_PREFER_LOCAL_SPEECH, true)
+
+    fun setLocalSpeechPreferred(preferLocalSpeech: Boolean) {
+        prefs.edit().putBoolean(KEY_PREFER_LOCAL_SPEECH, preferLocalSpeech).apply()
     }
 
     /**

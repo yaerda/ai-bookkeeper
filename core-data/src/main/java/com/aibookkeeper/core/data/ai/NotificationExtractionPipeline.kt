@@ -23,7 +23,8 @@ class NotificationExtractionPipeline @Inject constructor(
     private val strategyManager: ExtractionStrategyManager,
     private val rawEventRepository: RawEventRepository,
     private val transactionRepository: TransactionRepository,
-    private val categoryDao: CategoryDao
+    private val categoryDao: CategoryDao,
+    private val extractionCategoryProvider: ExtractionCategoryProvider
 ) {
     companion object {
         private const val TAG = "NotifExtraction"
@@ -48,7 +49,8 @@ class NotificationExtractionPipeline @Inject constructor(
         }
 
         // 2. Extract via AI (online-first, fallback to local)
-        val extractionResult = strategyManager.extract(content)
+        val categoryNames = extractionCategoryProvider.getCategoryNames(emptyList())
+        val extractionResult = strategyManager.extract(content, categoryNames)
 
         if (extractionResult.isFailure) {
             val error = extractionResult.exceptionOrNull()?.message ?: "Unknown error"
@@ -113,10 +115,11 @@ class NotificationExtractionPipeline @Inject constructor(
      */
     suspend fun retryFailedEvents() = withContext(Dispatchers.IO) {
         val retryable = rawEventRepository.getRetryableEvents()
+        val categoryNames = extractionCategoryProvider.getCategoryNames(emptyList())
         Log.i(TAG, "Retrying ${retryable.size} failed events")
 
         for (event in retryable) {
-            val result = strategyManager.extract(event.rawContent)
+            val result = strategyManager.extract(event.rawContent, categoryNames)
             if (result.isSuccess) {
                 val data = result.getOrThrow()
                 val categoryId = resolveCategoryId(data)

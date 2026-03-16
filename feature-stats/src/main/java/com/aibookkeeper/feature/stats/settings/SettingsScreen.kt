@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -45,6 +46,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.feature.stats.navigation.StatsRoutes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -173,6 +175,65 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
+            SettingsToggleRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "优先使用系统语音识别",
+                subtitle = if (uiState.preferLocalSpeech) {
+                    "检测到系统语音可用时优先使用它，不可用时再回退到 Azure 云端"
+                } else {
+                    "优先使用 Azure 云端语音；当云端不可用时仍会使用系统语音"
+                },
+                checked = uiState.preferLocalSpeech,
+                onCheckedChange = viewModel::setPreferLocalSpeech
+            )
+
+            Text(
+                text = if (uiState.isSystemSpeechAvailable) {
+                    "✅ ${uiState.systemSpeechSummary}"
+                } else {
+                    "⚠️ ${uiState.systemSpeechSummary}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (uiState.isSystemSpeechAvailable) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            if (uiState.systemSpeechProvider.isNotBlank()) {
+                Text(
+                    text = "当前系统语音服务：${uiState.systemSpeechProvider}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            SettingsNavigationRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "本地语音诊断",
+                subtitle = "检测系统语音识别 Activity / Service、权限与回调日志",
+                onClick = { navController.navigate(StatsRoutes.LOCAL_SPEECH_DIAGNOSTIC) }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
             OutlinedTextField(
                 value = uiState.azureEndpoint,
                 onValueChange = { viewModel.setAzureEndpoint(it) },
@@ -235,9 +296,11 @@ fun SettingsScreen(
                     uiState.azureEndpoint.isNotBlank() &&
                     uiState.azureSpeechDeployment.isNotBlank()
                 ) {
-                    "✅ 云端语音已配置"
+                    "✅ 云端语音已配置，可作为系统语音不可用时的兜底"
+                } else if (uiState.isSystemSpeechAvailable) {
+                    "ℹ️ 云端语音未配置 — 当前仍可使用系统语音识别"
                 } else {
-                    "⚠️ 云端语音未配置 — 语音按钮将提示先配置语音 Deployment"
+                    "⚠️ 云端语音未配置，且当前未检测到系统语音入口"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (
@@ -246,6 +309,8 @@ fun SettingsScreen(
                     uiState.azureSpeechDeployment.isNotBlank()
                 ) {
                     MaterialTheme.colorScheme.primary
+                } else if (uiState.isSystemSpeechAvailable) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.error
                 },
@@ -338,6 +403,76 @@ private fun NotificationToggleRow(
         Switch(
             checked = isEnabled && isPermissionGranted,
             onCheckedChange = { onToggle(it) }
+        )
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    icon: @Composable () -> Unit,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        icon()
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(
+    icon: @Composable () -> Unit,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        icon()
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = "进入$title",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

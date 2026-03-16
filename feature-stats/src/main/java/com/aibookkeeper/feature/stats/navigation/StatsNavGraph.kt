@@ -5,6 +5,7 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import com.aibookkeeper.feature.stats.overview.StatsScreen
 import com.aibookkeeper.feature.stats.settings.SettingsScreen
+import com.aibookkeeper.feature.stats.settings.speechdiagnostic.LocalSpeechDiagnosticScreen
 
 fun NavGraphBuilder.statsNavGraph(
     navController: NavController,
@@ -18,5 +19,8 @@ fun NavGraphBuilder.statsNavGraph(
             navController = navController,
             onNotificationServiceToggle = onNotificationServiceToggle
         )
+    }
+    composable(StatsRoutes.LOCAL_SPEECH_DIAGNOSTIC) {
+        LocalSpeechDiagnosticScreen(navController = navController)
     }
 }
