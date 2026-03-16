@@ -1,5 +1,9 @@
 package com.aibookkeeper.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -88,7 +92,8 @@ fun AppNavHost() {
                 InputRoutes.BILLS,
                 "settings"
             )
-            val showBottomBar = topLevelRoutes.any { currentRoute?.startsWith(it) == true }
+            val showBottomBar = currentRoute != ROUTE_SPLASH && currentRoute != ROUTE_ONBOARDING &&
+                topLevelRoutes.any { currentRoute?.startsWith(it) == true }
 
             if (showBottomBar) {
                 NavigationBar {
@@ -120,8 +125,11 @@ fun AppNavHost() {
             startDestination = startDestination,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // Full-screen splash image
-            composable(ROUTE_SPLASH) {
+            // Full-screen splash image — fade out when leaving
+            composable(
+                ROUTE_SPLASH,
+                exitTransition = { fadeOut() }
+            ) {
                 SplashScreen(
                     onSplashFinished = {
                         navController.navigate(actualDestination) {

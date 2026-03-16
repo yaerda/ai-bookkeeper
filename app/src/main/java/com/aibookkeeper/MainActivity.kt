@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
@@ -16,11 +17,17 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private var isComposeReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
+        // Keep system splash on screen until Compose splash is rendered
+        splashScreen.setKeepOnScreenCondition { !isComposeReady }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            // Signal that Compose is ready after first frame
+            LaunchedEffect(Unit) { isComposeReady = true }
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
