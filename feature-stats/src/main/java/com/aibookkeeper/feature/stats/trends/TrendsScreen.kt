@@ -58,6 +58,9 @@ import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModel
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.ColumnCartesianLayerModel
 import com.patrykandpatrick.vico.core.cartesian.data.LineCartesianLayerModel
+import com.patrykandpatrick.vico.core.cartesian.layer.ColumnCartesianLayer
+import com.patrykandpatrick.vico.core.common.component.LineComponent
+import com.patrykandpatrick.vico.core.common.data.ExtraStore
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -140,6 +143,32 @@ private fun BarChartSection(state: TrendsUiState, viewModel: TrendsViewModel) {
         val amounts = selectedCategories.map { it.amount }
         val labels = selectedCategories.map { it.name }
 
+        // Pre-create colored columns for each category
+        val coloredColumns = remember(selectedCategories) {
+            selectedCategories.map { cat ->
+                LineComponent(
+                    color = parseCategoryColorInt(cat.color),
+                    thicknessDp = 16f
+                )
+            }
+        }
+        val columnProvider = remember(coloredColumns) {
+            object : ColumnCartesianLayer.ColumnProvider {
+                override fun getColumn(
+                    entry: ColumnCartesianLayerModel.Entry,
+                    seriesIndex: Int,
+                    extraStore: ExtraStore
+                ): LineComponent {
+                    val idx = entry.x.toInt().coerceIn(0, coloredColumns.lastIndex)
+                    return coloredColumns[idx]
+                }
+                override fun getWidestSeriesColumn(
+                    seriesIndex: Int,
+                    extraStore: ExtraStore
+                ): LineComponent = coloredColumns.first()
+            }
+        }
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -149,7 +178,7 @@ private fun BarChartSection(state: TrendsUiState, viewModel: TrendsViewModel) {
             Box(modifier = Modifier.padding(12.dp)) {
                 CartesianChartHost(
                     chart = rememberCartesianChart(
-                        rememberColumnCartesianLayer(),
+                        rememberColumnCartesianLayer(columnProvider = columnProvider),
                         startAxis = VerticalAxis.rememberStart(),
                         bottomAxis = HorizontalAxis.rememberBottom(
                             valueFormatter = CartesianValueFormatter { _, value, _ ->
@@ -392,5 +421,13 @@ private fun parseCategoryColor(color: String): Color {
         Color(android.graphics.Color.parseColor(color))
     } catch (_: Exception) {
         Color(0xFF607D8B)
+    }
+}
+
+private fun parseCategoryColorInt(color: String): Int {
+    return try {
+        android.graphics.Color.parseColor(color)
+    } catch (_: Exception) {
+        0xFF607D8B.toInt()
     }
 }
