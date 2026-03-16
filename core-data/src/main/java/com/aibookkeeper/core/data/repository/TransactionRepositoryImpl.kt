@@ -126,4 +126,24 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun markSynced(ids: List<Long>) {
         ids.forEach { transactionDao.updateSyncStatus(it, SyncStatus.SYNCED.name) }
     }
+
+    override suspend fun getMonthlyExpense(yearMonth: YearMonth): Double =
+        transactionDao.sumByTypeAndDateRange(
+            "EXPENSE", yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis()
+        )
+
+    override suspend fun getCategoryBreakdownOnce(type: String, yearMonth: YearMonth): List<CategoryExpense> {
+        val sums = transactionDao.getCategoryBreakdown(type, yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis())
+        val total = sums.sumOf { it.total }
+        return sums.mapNotNull { sum ->
+            val category = sum.categoryId?.let { categoryDao.getById(it) }
+            CategoryExpense(
+                categoryId = sum.categoryId ?: 0,
+                categoryName = category?.name ?: "其他",
+                categoryColor = category?.color ?: "#607D8B",
+                amount = sum.total,
+                percentage = if (total > 0) (sum.total / total).toFloat() else 0f
+            )
+        }
+    }
 }

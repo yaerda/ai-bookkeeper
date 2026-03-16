@@ -120,7 +120,6 @@ fun CaptureScreen(
     fun clearAll() {
         imageUri = null
         pendingCameraUri = null
-        showResultPage = false
         ocrText = ""
         errorMessage = ""
         extractionResult = null
@@ -147,6 +146,7 @@ fun CaptureScreen(
         extractionResult = null
         savedMessage = ""
         processingLabel = ""
+        showResultPage = false
         imageUri = uri
     }
 
@@ -535,98 +535,68 @@ fun CaptureScreen(
                             ErrorMessageCard(errorMessage)
                         }
 
+                        // Side-by-side: labels on top, boxes below, buttons at bottom
+                        // Determine left label based on how we got here
+                        val leftLabel = if (ocrText.isNotBlank() && extractionResult == null) "📝 OCR 文本" else "📝 识别文本"
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Left label
+                            Text(
+                                text = leftLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Right label
+                            Text(
+                                text = "🤖 AI 结果",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        // Two aligned boxes
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top
                         ) {
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "📝 OCR 文本",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        TextButton(onClick = { showFullscreenEditor = true }) {
-                                            Text("全屏")
-                                        }
-                                    }
-                                    OutlinedTextField(
-                                        value = ocrText,
-                                        onValueChange = {
-                                            ocrText = it
-                                            extractionResult = null
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(150.dp),
-                                        placeholder = { Text("OCR 识别文本将显示在这里") },
-                                        textStyle = MaterialTheme.typography.bodySmall,
-                                        maxLines = 8
-                                    )
-                                }
-                            }
+                            // Left: editable OCR text
+                            OutlinedTextField(
+                                value = ocrText,
+                                onValueChange = {
+                                    ocrText = it
+                                    extractionResult = null
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(180.dp),
+                                placeholder = { Text("识别文本将显示在这里", style = MaterialTheme.typography.bodySmall) },
+                                textStyle = MaterialTheme.typography.bodySmall,
+                                shape = RoundedCornerShape(12.dp)
+                            )
 
-                            Column(
-                                modifier = Modifier.padding(top = 40.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                IconButton(
-                                    onClick = { runAiFromText(ocrText) },
-                                    enabled = ocrText.isNotBlank() && !isProcessing,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(
-                                            if (ocrText.isNotBlank()) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.surfaceVariant,
-                                            CircleShape
-                                        )
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "AI 提取",
-                                        tint = if (ocrText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Text(
-                                    "AI\n提取",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                    lineHeight = MaterialTheme.typography.labelSmall.lineHeight
-                                )
-                            }
-
+                            // Right: AI result
                             Card(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(180.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer
-                                )
+                                ),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(12.dp),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(
-                                        text = "🤖 AI 结果",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
                                     if (extractionResult != null) {
                                         val data = extractionResult!!
                                         Text(
@@ -660,13 +630,49 @@ fun CaptureScreen(
                                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
                                         )
                                     } else {
-                                        Text(
-                                            text = "点击 AI识别 或\n中间箭头提取",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
-                                        )
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "等待 AI 分析...",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+                                            )
+                                        }
                                     }
                                 }
+                            }
+                        }
+
+                        // Bottom row: [全屏编辑] [AI提取→] [✨ AI记账]
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { showFullscreenEditor = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("全屏编辑", style = MaterialTheme.typography.labelMedium)
+                            }
+                            Button(
+                                onClick = { runAiFromText(ocrText) },
+                                enabled = ocrText.isNotBlank() && !isProcessing,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("AI提取 →", style = MaterialTheme.typography.labelMedium)
+                            }
+                            Button(
+                                onClick = { extractionResult?.let { confirmAndSave(it) } },
+                                enabled = extractionResult != null && !isProcessing,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("✨ AI记账", style = MaterialTheme.typography.labelMedium)
                             }
                         }
 
@@ -693,7 +699,7 @@ fun CaptureScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Button(
-                                            onClick = { clearAll() },
+                                            onClick = { clearAll(); showResultPage = false },
                                             modifier = Modifier.weight(1f)
                                         ) {
                                             Text("继续识别")
@@ -707,19 +713,6 @@ fun CaptureScreen(
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    if (extractionResult != null && savedMessage.isBlank()) {
-                        Button(
-                            onClick = { extractionResult?.let { confirmAndSave(it) } },
-                            enabled = !isProcessing,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Text("✨ AI 记账")
                         }
                     }
 

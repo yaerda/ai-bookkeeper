@@ -8,6 +8,7 @@ import com.aibookkeeper.feature.stats.settings.SettingsScreen
 import com.aibookkeeper.feature.stats.settings.changelog.ChangelogScreen
 import com.aibookkeeper.feature.stats.settings.paymentpattern.PaymentPatternListScreen
 import com.aibookkeeper.feature.stats.settings.speechdiagnostic.LocalSpeechDiagnosticScreen
+import com.aibookkeeper.feature.stats.trends.TrendsScreen
 
 fun NavGraphBuilder.statsNavGraph(
     navController: NavController,
@@ -30,5 +31,8 @@ fun NavGraphBuilder.statsNavGraph(
     }
     composable(StatsRoutes.CHANGELOG) {
         ChangelogScreen(navController = navController)
+    }
+    composable(StatsRoutes.TRENDS) {
+        TrendsScreen(navController = navController)
     }
 }

@@ -114,6 +114,17 @@ interface TransactionDao {
     """)
     suspend fun countByDateRange(startMillis: Long, endMillis: Long): Int
 
+    // === Trends ===
+
+    @Query("""
+        SELECT categoryId, SUM(amount) as total 
+        FROM transactions 
+        WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
+        GROUP BY categoryId
+        ORDER BY total DESC
+    """)
+    suspend fun getCategoryBreakdown(type: String, startMillis: Long, endMillis: Long): List<CategorySum>
+
     // === Sync ===
 
     @Query("SELECT * FROM transactions WHERE syncStatus = 'PENDING_SYNC' ORDER BY updatedAt ASC")

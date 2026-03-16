@@ -51,6 +51,10 @@ dependencies {
     // Navigation
     implementation(libs.navigation.compose)
 
+    // Charts (Vico)
+    implementation(libs.vico.compose.m3)
+    implementation(libs.vico.core)
+
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

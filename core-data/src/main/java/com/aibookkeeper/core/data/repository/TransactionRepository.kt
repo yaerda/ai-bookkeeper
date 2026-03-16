@@ -41,4 +41,8 @@ interface TransactionRepository {
     suspend fun getPendingSync(): List<Transaction>
 
     suspend fun markSynced(ids: List<Long>)
+
+    suspend fun getMonthlyExpense(yearMonth: YearMonth): Double
+
+    suspend fun getCategoryBreakdownOnce(type: String, yearMonth: YearMonth): List<CategoryExpense>
 }
