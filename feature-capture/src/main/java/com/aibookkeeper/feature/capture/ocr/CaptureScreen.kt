@@ -58,8 +58,10 @@ import androidx.core.content.FileProvider
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
 import dagger.hilt.android.EntryPointAccessors
+import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
+import com.aibookkeeper.core.data.ai.ExtractionStrategyManager
 import com.aibookkeeper.core.data.ai.NotificationExtractionPipeline
-import com.aibookkeeper.core.data.model.Transaction
+import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -67,7 +69,6 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,13 +88,16 @@ fun CaptureScreen(
     }
     val pipeline = remember(entryPoint) { entryPoint.notificationExtractionPipeline() }
     val transactionRepository = remember(entryPoint) { entryPoint.transactionRepository() }
+    val strategyManager = remember(entryPoint) { entryPoint.extractionStrategyManager() }
+    val categoryProvider = remember(entryPoint) { entryPoint.extractionCategoryProvider() }
 
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var ocrText by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
-    var resultMessage by remember { mutableStateOf("") }
+    var processingLabel by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-    var extractedTransaction by remember { mutableStateOf<Transaction?>(null) }
+    var extractionResult by remember { mutableStateOf<ExtractionResult?>(null) }
+    var savedMessage by remember { mutableStateOf("") }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -105,9 +109,10 @@ fun CaptureScreen(
 
     fun clearResultState() {
         ocrText = ""
-        resultMessage = ""
         errorMessage = ""
-        extractedTransaction = null
+        extractionResult = null
+        savedMessage = ""
+        processingLabel = ""
     }
 
     fun clearSelectedImage() {
@@ -118,34 +123,11 @@ fun CaptureScreen(
         cameraImageFile = null
     }
 
-    val onImageReady: (Uri) -> Unit = { uri ->
+    val onImageSelected: (Uri) -> Unit = { uri ->
         pendingCameraUri = null
         clearResultState()
         imageUri = uri
-        processImage(
-            context = context,
-            uri = uri,
-            onOcrResult = {
-                ocrText = it
-                errorMessage = ""
-            },
-            onTransactionResult = { transaction ->
-                extractedTransaction = transaction
-                resultMessage = transaction?.let {
-                    "✅ 记账成功 ¥${"%.2f".format(it.amount)} ${it.categoryName ?: "未分类"}"
-                } ?: "✅ 记账成功"
-                errorMessage = ""
-            },
-            onError = {
-                errorMessage = it
-                resultMessage = ""
-                extractedTransaction = null
-            },
-            setProcessing = { isProcessing = it },
-            coroutineScope = coroutineScope,
-            pipeline = pipeline,
-            transactionRepository = transactionRepository
-        )
+        // No auto-processing — user chooses when to analyze
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -154,7 +136,7 @@ fun CaptureScreen(
         val capturedUri = pendingCameraUri
         pendingCameraUri = null
         if (success && capturedUri != null) {
-            onImageReady(capturedUri)
+            onImageSelected(capturedUri)
         } else {
             cameraImageFile?.delete()
             cameraImageFile = null
@@ -170,18 +152,17 @@ fun CaptureScreen(
         if (uri != null) {
             cameraImageFile?.delete()
             cameraImageFile = null
-            onImageReady(uri)
+            onImageSelected(uri)
         }
     }
 
-    // File picker (broader than gallery — picks from Files, Downloads, etc.)
     val fileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
             cameraImageFile?.delete()
             cameraImageFile = null
-            onImageReady(uri)
+            onImageSelected(uri)
         }
     }
 
@@ -224,7 +205,144 @@ fun CaptureScreen(
         }
     }
 
-    fun navigateToTextInput() {
+    // OCR only — shows text, no extraction
+    fun runOcrOnly(uri: Uri) {
+        isProcessing = true
+        processingLabel = "正在 OCR 识别文字..."
+        errorMessage = ""
+        extractionResult = null
+        savedMessage = ""
+
+        val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrElse {
+            isProcessing = false
+            errorMessage = "无法读取图片: ${it.message ?: "未知错误"}"
+            return
+        }
+
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        recognizer.process(inputImage)
+            .addOnSuccessListener { visionText ->
+                isProcessing = false
+                ocrText = visionText.text.trim()
+                if (ocrText.isBlank()) errorMessage = "未识别到文字内容"
+            }
+            .addOnFailureListener { e ->
+                isProcessing = false
+                errorMessage = "OCR识别失败: ${e.message ?: "未知错误"}"
+            }
+            .addOnCompleteListener { recognizer.close() }
+    }
+
+    // AI extraction — OCR first, then AI extracts structured data (no auto-save)
+    fun runAiExtraction(uri: Uri) {
+        isProcessing = true
+        processingLabel = "正在 OCR 识别..."
+        errorMessage = ""
+        extractionResult = null
+        savedMessage = ""
+
+        val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrElse {
+            isProcessing = false
+            errorMessage = "无法读取图片: ${it.message ?: "未知错误"}"
+            return
+        }
+
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        recognizer.process(inputImage)
+            .addOnSuccessListener { visionText ->
+                val text = visionText.text.trim()
+                ocrText = text
+                if (text.isBlank()) {
+                    isProcessing = false
+                    errorMessage = "未识别到文字内容"
+                    return@addOnSuccessListener
+                }
+
+                processingLabel = "AI 正在提取消费信息..."
+                coroutineScope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val categoryNames = categoryProvider.getCategoryNames(emptyList())
+                            strategyManager.extractFromOcr(text, categoryNames)
+                        }
+                    }.onSuccess { result ->
+                        isProcessing = false
+                        if (result.isSuccess) {
+                            extractionResult = result.getOrNull()
+                        } else {
+                            errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                        }
+                    }.onFailure { throwable ->
+                        isProcessing = false
+                        errorMessage = throwable.message ?: "提取失败，请重试"
+                    }
+                }
+            }
+            .addOnFailureListener { e ->
+                isProcessing = false
+                errorMessage = "OCR识别失败: ${e.message ?: "未知错误"}"
+            }
+            .addOnCompleteListener { recognizer.close() }
+    }
+
+    // Re-extract from edited OCR text (no auto-save)
+    fun reExtractFromText(text: String) {
+        if (text.isBlank()) {
+            errorMessage = "请先识别或输入文字内容"
+            return
+        }
+        isProcessing = true
+        processingLabel = "AI 正在提取消费信息..."
+        errorMessage = ""
+        extractionResult = null
+        savedMessage = ""
+
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val categoryNames = categoryProvider.getCategoryNames(emptyList())
+                    strategyManager.extractFromOcr(text, categoryNames)
+                }
+            }.onSuccess { result ->
+                isProcessing = false
+                if (result.isSuccess) {
+                    extractionResult = result.getOrNull()
+                } else {
+                    errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                }
+            }.onFailure { throwable ->
+                isProcessing = false
+                errorMessage = throwable.message ?: "提取失败，请重试"
+            }
+        }
+    }
+
+    // Confirm and save
+    fun confirmAndSave(data: ExtractionResult) {
+        isProcessing = true
+        processingLabel = "正在保存..."
+
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    pipeline.processNotification("OCR", ocrText)
+                }
+            }.onSuccess { transactionId ->
+                isProcessing = false
+                if (transactionId > 0) {
+                    savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
+                    extractionResult = null
+                } else {
+                    errorMessage = "保存失败，请重试"
+                }
+            }.onFailure { throwable ->
+                isProcessing = false
+                errorMessage = "保存失败: ${throwable.message ?: "未知错误"}"
+            }
+        }
+    }
+
+    fun navigateBack() {
         navController.previousBackStackEntry?.savedStateHandle?.set("openAiSheet", true)
         navController.popBackStack()
     }
@@ -234,7 +352,7 @@ fun CaptureScreen(
             TopAppBar(
                 title = { Text("拍照识别") },
                 navigationIcon = {
-                    IconButton(onClick = { navigateToTextInput() }) {
+                    IconButton(onClick = { navigateBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
@@ -250,6 +368,7 @@ fun CaptureScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Image preview
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp)
@@ -280,7 +399,7 @@ fun CaptureScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "自动执行 ML Kit OCR，并交给 AI 提取消费信息",
+                                text = "选择图片后，可选择 OCR 或 AI 识别",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -289,6 +408,32 @@ fun CaptureScreen(
                 }
             }
 
+            // Action buttons after image selected (no auto-processing)
+            if (imageUri != null && savedMessage.isBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { imageUri?.let { runOcrOnly(it) } },
+                        enabled = !isProcessing,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("📝 OCR识别")
+                    }
+                    Button(
+                        onClick = { imageUri?.let { runAiExtraction(it) } },
+                        enabled = !isProcessing,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("🤖 AI识别")
+                    }
+                }
+            }
+
+            // Processing indicator
             if (isProcessing) {
                 Card(
                     colors = CardDefaults.cardColors(
@@ -303,19 +448,13 @@ fun CaptureScreen(
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text("识别中...", fontWeight = FontWeight.Medium)
-                            Text(
-                                "正在进行 OCR 与 AI 提取，请稍候",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(processingLabel, fontWeight = FontWeight.Medium)
                     }
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
 
+            // Error
             if (errorMessage.isNotBlank()) {
                 Card(
                     colors = CardDefaults.cardColors(
@@ -337,16 +476,12 @@ fun CaptureScreen(
                             text = errorMessage,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
-                        if (imageUri != null && !isProcessing) {
-                            TextButton(onClick = { imageUri?.let(onImageReady) }) {
-                                Text("重新识别")
-                            }
-                        }
                     }
                 }
             }
 
-            if (imageUri != null) {
+            // OCR text (editable)
+            if (ocrText.isNotBlank() && savedMessage.isBlank()) {
                 Text(
                     text = "识别文本（可编辑后重新提取）",
                     style = MaterialTheme.typography.titleMedium,
@@ -357,59 +492,116 @@ fun CaptureScreen(
                     onValueChange = {
                         ocrText = it
                         errorMessage = ""
-                        resultMessage = ""
-                        extractedTransaction = null
+                        extractionResult = null
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 5,
-                    maxLines = 10,
+                    minLines = 4,
+                    maxLines = 8,
                     enabled = !isProcessing,
-                    placeholder = { Text("这里会显示 OCR 识别结果") },
-                    supportingText = { Text("如有识别错误，可手动修改后再次提取") }
+                    placeholder = { Text("OCR 识别结果") },
+                    supportingText = { Text("如有识别错误，可手动修改后点击「重新提取」") }
                 )
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = {
-                            clearResultState()
-                            extractTransactionFromText(
-                                text = ocrText,
-                                coroutineScope = coroutineScope,
-                                pipeline = pipeline,
-                                transactionRepository = transactionRepository,
-                                onTransactionResult = { transaction ->
-                                    extractedTransaction = transaction
-                                    resultMessage = transaction?.let {
-                                        "✅ 记账成功 ¥${"%.2f".format(it.amount)} ${it.categoryName ?: "未分类"}"
-                                    } ?: "✅ 记账成功"
-                                },
-                                onError = {
-                                    errorMessage = it
-                                    resultMessage = ""
-                                    extractedTransaction = null
-                                },
-                                setProcessing = { isProcessing = it }
-                            )
-                        },
+                        onClick = { reExtractFromText(ocrText) },
                         enabled = ocrText.isNotBlank() && !isProcessing,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("重新提取")
+                        Text("🤖 重新提取")
                     }
                     OutlinedButton(
                         onClick = { clearSelectedImage() },
                         enabled = !isProcessing,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("继续拍照")
+                        Text("换张图片")
                     }
                 }
             }
 
-            if (resultMessage.isNotBlank()) {
+            // Extraction result preview — user must confirm
+            extractionResult?.let { data ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "📋 识别结果预览",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "金额：¥${"%.2f".format(data.amount ?: 0.0)}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "类型：${if (data.type == "EXPENSE") "支出" else "收入"}",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "分类：${data.category}",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        if (!data.merchantName.isNullOrBlank()) {
+                            Text(
+                                text = "商户：${data.merchantName}",
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        if (!data.note.isNullOrBlank()) {
+                            Text(
+                                text = "备注：${data.note}",
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        Text(
+                            text = "置信度：${"%.0f".format(data.confidence * 100)}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { confirmAndSave(data) },
+                                enabled = !isProcessing,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("✅ 确认记账")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    extractionResult = null
+                                    errorMessage = ""
+                                },
+                                enabled = !isProcessing,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("❌ 放弃")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Success message
+            if (savedMessage.isNotBlank()) {
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -422,40 +614,33 @@ fun CaptureScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = resultMessage,
+                            text = savedMessage,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
-                        extractedTransaction?.let { transaction ->
-                            Text(
-                                text = "金额：¥${"%.2f".format(transaction.amount)}",
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = "分类：${transaction.categoryName ?: "未分类"}",
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            if (!transaction.merchantName.isNullOrBlank()) {
-                                Text(
-                                    text = "商户：${transaction.merchantName}",
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { clearSelectedImage() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("继续识别")
                             }
-                            if (!transaction.note.isNullOrBlank()) {
-                                Text(
-                                    text = "备注：${transaction.note}",
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                            OutlinedButton(
+                                onClick = { navigateBack() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("返回")
                             }
-                        }
-                        TextButton(onClick = { navigateToTextInput() }) {
-                            Text("返回")
                         }
                     }
                 }
             }
 
+            // Image source buttons (always at bottom)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -497,91 +682,6 @@ fun CaptureScreen(
     }
 }
 
-private fun processImage(
-    context: Context,
-    uri: Uri,
-    onOcrResult: (String) -> Unit,
-    onTransactionResult: (Transaction?) -> Unit,
-    onError: (String) -> Unit,
-    setProcessing: (Boolean) -> Unit,
-    coroutineScope: CoroutineScope,
-    pipeline: NotificationExtractionPipeline,
-    transactionRepository: TransactionRepository
-) {
-    val inputImage = runCatching { InputImage.fromFilePath(context, uri) }.getOrElse {
-        setProcessing(false)
-        onError("无法读取图片: ${it.message ?: "未知错误"}")
-        return
-    }
-
-    setProcessing(true)
-    val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-
-    recognizer.process(inputImage)
-        .addOnSuccessListener { visionText ->
-            val text = visionText.text.trim()
-            onOcrResult(text)
-
-            if (text.isBlank()) {
-                setProcessing(false)
-                onError("未识别到文字内容")
-                return@addOnSuccessListener
-            }
-
-            extractTransactionFromText(
-                text = text,
-                coroutineScope = coroutineScope,
-                pipeline = pipeline,
-                transactionRepository = transactionRepository,
-                onTransactionResult = onTransactionResult,
-                onError = onError,
-                setProcessing = setProcessing
-            )
-        }
-        .addOnFailureListener { e ->
-            setProcessing(false)
-            onError("OCR识别失败: ${e.message ?: "未知错误"}")
-        }
-        .addOnCompleteListener {
-            recognizer.close()
-        }
-}
-
-private fun extractTransactionFromText(
-    text: String,
-    coroutineScope: CoroutineScope,
-    pipeline: NotificationExtractionPipeline,
-    transactionRepository: TransactionRepository,
-    onTransactionResult: (Transaction?) -> Unit,
-    onError: (String) -> Unit,
-    setProcessing: (Boolean) -> Unit
-) {
-    if (text.isBlank()) {
-        onError("请先识别或输入文字内容")
-        return
-    }
-
-    setProcessing(true)
-    coroutineScope.launch {
-        runCatching {
-            withContext(Dispatchers.IO) {
-                val transactionId = pipeline.processNotification("OCR", text)
-                transactionId to if (transactionId > 0) transactionRepository.getById(transactionId) else null
-            }
-        }.onSuccess { (transactionId, transaction) ->
-            setProcessing(false)
-            if (transactionId > 0) {
-                onTransactionResult(transaction)
-            } else {
-                onError("未识别到有效消费信息，请确认文字内容后重试")
-            }
-        }.onFailure { throwable ->
-            setProcessing(false)
-            onError(throwable.message ?: "提取失败，请重试")
-        }
-    }
-}
-
 private fun Context.hasCameraPermission(): Boolean {
     return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
         PackageManager.PERMISSION_GRANTED
@@ -592,4 +692,6 @@ private fun Context.hasCameraPermission(): Boolean {
 interface CaptureScreenEntryPoint {
     fun notificationExtractionPipeline(): NotificationExtractionPipeline
     fun transactionRepository(): TransactionRepository
+    fun extractionStrategyManager(): ExtractionStrategyManager
+    fun extractionCategoryProvider(): ExtractionCategoryProvider
 }
