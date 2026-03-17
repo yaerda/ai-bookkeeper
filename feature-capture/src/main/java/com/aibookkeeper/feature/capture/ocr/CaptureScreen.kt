@@ -613,8 +613,17 @@ fun CaptureScreen(
 
     // ── Fullscreen text editor ──
     if (showFullscreenEditor) {
+        val originalText = remember { ocrText }
+        fun dismissEditor() {
+            showFullscreenEditor = false
+            if (ocrText != originalText) {
+                extractionResult = null
+                visionItems = emptyList()
+                splitTexts = ocrText.lines().filter { it.isNotBlank() }
+            }
+        }
         Dialog(
-            onDismissRequest = { showFullscreenEditor = false },
+            onDismissRequest = { dismissEditor() },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Scaffold(
@@ -622,12 +631,12 @@ fun CaptureScreen(
                     TopAppBar(
                         title = { Text("编辑识别文本") },
                         navigationIcon = {
-                            IconButton(onClick = { showFullscreenEditor = false }) {
+                            IconButton(onClick = { dismissEditor() }) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "关闭")
                             }
                         },
                         actions = {
-                            TextButton(onClick = { showFullscreenEditor = false }) {
+                            TextButton(onClick = { dismissEditor() }) {
                                 Text("完成")
                             }
                         }
@@ -636,12 +645,7 @@ fun CaptureScreen(
             ) { padding ->
                 OutlinedTextField(
                     value = ocrText,
-                    onValueChange = {
-                        ocrText = it
-                        extractionResult = null
-                        visionItems = emptyList()
-                        splitTexts = it.lines().filter { line -> line.isNotBlank() }
-                    },
+                    onValueChange = { ocrText = it },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
@@ -669,17 +673,13 @@ fun CaptureScreen(
                     )
                 }
             ) { padding ->
+                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (isProcessing) {
-                        ProcessingStatusCard()
-                    }
-
                     if (errorMessage.isNotBlank()) {
                         ErrorMessageCard(errorMessage)
                     }
@@ -750,23 +750,12 @@ fun CaptureScreen(
                                         .padding(vertical = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    // Left: editable text field per item
+                                    // Left: item text (read-only) + date
                                     Column(modifier = Modifier.weight(1f)) {
-                                        val currentText = splitTexts.getOrNull(index) ?: ""
-                                        OutlinedTextField(
-                                            value = currentText,
-                                            onValueChange = { newVal ->
-                                                splitTexts = splitTexts.toMutableList().also {
-                                                    while (it.size <= index) it.add("")
-                                                    it[index] = newVal
-                                                }
-                                                // Sync back to ocrText
-                                                ocrText = splitTexts.joinToString("\n")
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = MaterialTheme.typography.bodySmall,
-                                            singleLine = true,
-                                            shape = RoundedCornerShape(8.dp)
+                                        Text(
+                                            text = splitTexts.getOrNull(index) ?: item.note ?: "项目${index + 1}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         val dateDisplay = try {
                                             val d = java.time.LocalDate.parse(item.date)
@@ -855,51 +844,47 @@ fun CaptureScreen(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     if (extractionResult != null) {
                                         val data = extractionResult!!
-                                        Text(
-                                            text = "¥${"%.2f".format(data.amount ?: 0.0)}",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
                                         Text(
                                             text = "${if (data.type == "EXPENSE") "支出" else "收入"} · ${data.category}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer
                                         )
+                                        Text(
+                                            text = "¥${"%.2f".format(data.amount ?: 0.0)}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
                                         if (!data.merchantName.isNullOrBlank()) {
                                             Text(
                                                 text = "🏪 ${data.merchantName}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                                             )
                                         }
                                         if (!data.note.isNullOrBlank()) {
                                             Text(
                                                 text = "📝 ${data.note}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                                             )
                                         }
                                         Text(
                                             text = "置信度 ${"%.0f".format(data.confidence * 100)}%",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f)
                                         )
                                     } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "请使用 AI 重新提取",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
-                                            )
-                                        }
+                                        Text(
+                                            text = "请使用 AI 重新提取",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
+                                        )
                                     }
                                 }
                             }
@@ -1000,6 +985,27 @@ fun CaptureScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
+
+                // Loading overlay
+                if (isProcessing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = processingLabel.ifBlank { "AI 识别中..." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                } // Box
             }
         }
     }
