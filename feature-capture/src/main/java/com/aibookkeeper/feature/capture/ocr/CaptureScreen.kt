@@ -723,34 +723,86 @@ fun CaptureScreen(
                         }
 
                     // Two aligned boxes — fill available space
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        // Left: editable OCR text
-                        OutlinedTextField(
-                            value = ocrText,
-                            onValueChange = {
-                                ocrText = it
-                                extractionResult = null
-                                visionItems = emptyList()
-                            },
+                    if (isSplitMode && visionItems.isNotEmpty()) {
+                        // Split mode: aligned item rows
+                        Column(
                             modifier = Modifier
+                                .fillMaxWidth()
                                 .weight(1f)
-                                .fillMaxHeight(),
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(0.dp)
+                        ) {
+                            visionItems.forEachIndexed { index, item ->
+                                if (index > 0) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Left: item name from formatted text
+                                    Text(
+                                        text = item.note ?: "项目${index + 1}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    // Right: amount + category
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        horizontalAlignment = Alignment.End
+                                    ) {
+                                        Text(
+                                            text = "${if (item.type == "INCOME") "+" else "-"}¥${"%.2f".format(item.amount ?: 0.0)}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (item.type == "INCOME")
+                                                Color(0xFF4CAF50)
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = item.category,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Summary mode: two side-by-side boxes
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            // Left: editable OCR text
+                            OutlinedTextField(
+                                value = ocrText,
+                                onValueChange = {
+                                    ocrText = it
+                                    extractionResult = null
+                                    visionItems = emptyList()
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                                 placeholder = { Text("识别结果将显示在这里\n可编辑文本内容", style = MaterialTheme.typography.bodySmall) },
                                 textStyle = MaterialTheme.typography.bodySmall,
                                 shape = RoundedCornerShape(12.dp)
                             )
 
-                        // Right: AI result (summary or split items)
-                        Card(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
+                            // Right: AI summary result
+                            Card(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                                 ),
@@ -759,35 +811,10 @@ fun CaptureScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(12.dp)
-                                        .verticalScroll(rememberScrollState()),
+                                        .padding(12.dp),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    if (isSplitMode && visionItems.isNotEmpty()) {
-                                        // Split mode: show each item
-                                        visionItems.forEachIndexed { index, item ->
-                                            if (index > 0) {
-                                                HorizontalDivider(
-                                                    modifier = Modifier.padding(vertical = 2.dp),
-                                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
-                                                )
-                                            }
-                                            Text(
-                                                text = "${if (item.type == "INCOME") "+" else "-"}¥${"%.2f".format(item.amount ?: 0.0)}",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (item.type == "INCOME")
-                                                    Color(0xFF4CAF50)
-                                                else MaterialTheme.colorScheme.onSecondaryContainer
-                                            )
-                                            Text(
-                                                text = "${item.category}${if (!item.note.isNullOrBlank()) " · ${item.note}" else ""}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                                            )
-                                        }
-                                    } else if (extractionResult != null) {
-                                        // Summary mode
+                                    if (extractionResult != null) {
                                         val data = extractionResult!!
                                         Text(
                                             text = "¥${"%.2f".format(data.amount ?: 0.0)}",
@@ -834,6 +861,7 @@ fun CaptureScreen(
                                 }
                             }
                         }
+                    }
 
                         // Bottom row: [全屏编辑] [AI提取 arrow] [✨ AI记账]
                         Row(
