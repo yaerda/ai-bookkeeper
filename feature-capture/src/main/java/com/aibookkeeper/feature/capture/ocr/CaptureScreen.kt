@@ -118,6 +118,7 @@ fun CaptureScreen(
     var errorMessage by remember { mutableStateOf("") }
     var extractionResult by remember { mutableStateOf<ExtractionResult?>(null) }
     var visionItems by remember { mutableStateOf<List<ExtractionResult>>(emptyList()) }
+    var splitTexts by remember { mutableStateOf<List<String>>(emptyList()) }
     var isSplitMode by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf("") }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
@@ -285,6 +286,7 @@ fun CaptureScreen(
                 if (result.isSuccess) {
                     extractionResult = result.getOrNull()
                     visionItems = emptyList() // Clear stale split items from previous vision
+                    splitTexts = emptyList()
                 }
                 else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
             }.onFailure { throwable ->
@@ -384,6 +386,7 @@ fun CaptureScreen(
             val detailed = outerResult.getOrNull()!!
             ocrText = detailed.formattedText
             visionItems = detailed.items
+            splitTexts = detailed.formattedText.lines().filter { it.isNotBlank() }
 
             // Step 2: Auto-trigger text extraction for accurate right-box result
             if (detailed.formattedText.isNotBlank()) {
@@ -636,6 +639,8 @@ fun CaptureScreen(
                     onValueChange = {
                         ocrText = it
                         extractionResult = null
+                        visionItems = emptyList()
+                        splitTexts = it.lines().filter { line -> line.isNotBlank() }
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -724,16 +729,15 @@ fun CaptureScreen(
 
                     // Two aligned boxes — fill available space
                     if (isSplitMode) {
-                        // Split mode: aligned item rows
+                        // Split mode: editable item rows aligned with extraction
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
+                                .weight(0.5f, fill = false)
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
                             if (visionItems.isNotEmpty()) {
-                            val textLines = ocrText.lines().filter { it.isNotBlank() }
                             visionItems.forEachIndexed { index, item ->
                                 if (index > 0) {
                                     HorizontalDivider(
@@ -743,17 +747,26 @@ fun CaptureScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 6.dp),
+                                        .padding(vertical = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    // Left: original text line + date
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = textLines.getOrNull(index) ?: item.note ?: "项目${index + 1}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                    // Left: editable text field per item
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val currentText = splitTexts.getOrNull(index) ?: ""
+                                        OutlinedTextField(
+                                            value = currentText,
+                                            onValueChange = { newVal ->
+                                                splitTexts = splitTexts.toMutableList().also {
+                                                    while (it.size <= index) it.add("")
+                                                    it[index] = newVal
+                                                }
+                                                // Sync back to ocrText
+                                                ocrText = splitTexts.joinToString("\n")
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = MaterialTheme.typography.bodySmall,
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(8.dp)
                                         )
                                         val dateDisplay = try {
                                             val d = java.time.LocalDate.parse(item.date)
@@ -807,7 +820,7 @@ fun CaptureScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(0.5f, fill = false),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top
                         ) {
@@ -818,6 +831,7 @@ fun CaptureScreen(
                                     ocrText = it
                                     extractionResult = null
                                     visionItems = emptyList()
+                                    splitTexts = it.lines().filter { line -> line.isNotBlank() }
                                 },
                                 modifier = Modifier
                                     .weight(1f)
