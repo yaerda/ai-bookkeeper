@@ -39,4 +39,10 @@ class PrepopulateCallback : RoomDatabase.Callback() {
 
         PaymentPagePatternSeedData.insertDefaults(db)
     }
+
+    override fun onOpen(db: SupportSQLiteDatabase) {
+        super.onOpen(db)
+        // Fix transactions with date=0 or very small date values — use createdAt instead
+        db.execSQL("UPDATE transactions SET date = createdAt WHERE date <= 0 OR date < 946684800000")
+    }
 }
