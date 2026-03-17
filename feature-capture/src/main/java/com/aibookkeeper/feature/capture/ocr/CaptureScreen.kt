@@ -122,6 +122,7 @@ fun CaptureScreen(
     var splitTexts by remember { mutableStateOf<List<String>>(emptyList()) }
     var isSplitMode by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf("") }
+    var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var showFullscreenEditor by remember { mutableStateOf(false) }
@@ -134,6 +135,45 @@ fun CaptureScreen(
     }
 
     val hasContent = ocrText.isNotBlank() || extractionResult != null || savedMessage.isNotBlank()
+
+    // Regex to extract amount from structured text like "商品名 ¥26.00" or "¥26.00"
+    val amountRegex = remember { Regex("[¥￥]\\s*(\\d+\\.?\\d*)") }
+
+    // Parse amounts from text using regex, update right side results
+    fun updateResultsFromText(text: String) {
+        val lines = text.lines().filter { it.isNotBlank() }
+        val amounts = lines.map { line ->
+            amountRegex.find(line)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        }
+        val totalAmount = amounts.sum()
+
+        // Update summary result
+        extractionResult = extractionResult?.copy(amount = totalAmount)
+            ?: if (totalAmount > 0) ExtractionResult(
+                amount = totalAmount, type = "EXPENSE", category = "其他",
+                date = java.time.LocalDate.now().toString(), confidence = 0.5f
+            ) else null
+
+        // Update split items
+        if (visionItems.isNotEmpty()) {
+            visionItems = visionItems.mapIndexed { index, item ->
+                item.copy(
+                    amount = amounts.getOrElse(index) { item.amount ?: 0.0 },
+                    note = lines.getOrNull(index)?.replace(amountRegex, "")?.trim() ?: item.note
+                )
+            }
+        }
+        splitTexts = lines
+    }
+
+    // Debounced update for inline editing (2s delay)
+    fun scheduleUpdateFromText(text: String) {
+        debounceJob?.cancel()
+        debounceJob = coroutineScope.launch {
+            kotlinx.coroutines.delay(2000)
+            updateResultsFromText(text)
+        }
+    }
 
     fun clearAll() {
         imageUri = null
@@ -617,9 +657,8 @@ fun CaptureScreen(
         fun dismissEditor() {
             showFullscreenEditor = false
             splitTexts = ocrText.lines().filter { it.isNotBlank() }
-            // Auto re-extract if text was changed
-            if (ocrText != originalText && ocrText.isNotBlank()) {
-                runAiFromText(ocrText)
+            if (ocrText != originalText) {
+                updateResultsFromText(ocrText)
             }
         }
         Dialog(
@@ -827,9 +866,7 @@ fun CaptureScreen(
                                 value = ocrText,
                                 onValueChange = {
                                     ocrText = it
-                                    extractionResult = null
-                                    visionItems = emptyList()
-                                    splitTexts = it.lines().filter { line -> line.isNotBlank() }
+                                    scheduleUpdateFromText(it)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -922,22 +959,6 @@ fun CaptureScreen(
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("编辑", style = MaterialTheme.typography.labelMedium)
-                            }
-                            // Compact "AI提取" button
-                            FilledTonalButton(
-                                onClick = { runAiFromText(ocrText) },
-                                enabled = ocrText.isNotBlank() && !isProcessing,
-                                modifier = Modifier.weight(0.8f),
-                                shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("AI提取", style = MaterialTheme.typography.labelSmall)
                             }
                             Button(
                                 onClick = {
