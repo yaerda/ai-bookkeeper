@@ -723,7 +723,7 @@ fun CaptureScreen(
                         }
 
                     // Two aligned boxes — fill available space
-                    if (isSplitMode && visionItems.isNotEmpty()) {
+                    if (isSplitMode) {
                         // Split mode: aligned item rows
                         Column(
                             modifier = Modifier
@@ -732,6 +732,8 @@ fun CaptureScreen(
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
+                            if (visionItems.isNotEmpty()) {
+                            val textLines = ocrText.lines().filter { it.isNotBlank() }
                             visionItems.forEachIndexed { index, item ->
                                 if (index > 0) {
                                     HorizontalDivider(
@@ -744,14 +746,29 @@ fun CaptureScreen(
                                         .padding(vertical = 6.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    // Left: item name from formatted text
-                                    Text(
-                                        text = item.note ?: "项目${index + 1}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    // Right: amount + category
+                                    // Left: original text line + date
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = textLines.getOrNull(index) ?: item.note ?: "项目${index + 1}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val dateDisplay = try {
+                                            val d = java.time.LocalDate.parse(item.date)
+                                            "${d.monthValue}/${d.dayOfMonth}"
+                                        } catch (_: Exception) {
+                                            val now = java.time.LocalDate.now()
+                                            "${now.monthValue}/${now.dayOfMonth}"
+                                        }
+                                        Text(
+                                            text = dateDisplay,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                    // Right: extracted amount + category
                                     Column(
                                         modifier = Modifier.weight(1f),
                                         horizontalAlignment = Alignment.End
@@ -770,6 +787,18 @@ fun CaptureScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                }
+                            }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "请使用 AI 重新提取",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
                                 }
                             }
                         }
@@ -852,7 +881,7 @@ fun CaptureScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "等待 AI 分析...",
+                                                text = "请使用 AI 重新提取",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
                                             )
