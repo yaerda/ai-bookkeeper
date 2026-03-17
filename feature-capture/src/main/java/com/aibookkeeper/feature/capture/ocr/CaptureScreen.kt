@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -280,7 +282,10 @@ fun CaptureScreen(
                 }
             }.onSuccess { result ->
                 isProcessing = false
-                if (result.isSuccess) extractionResult = result.getOrNull()
+                if (result.isSuccess) {
+                    extractionResult = result.getOrNull()
+                    visionItems = emptyList() // Clear stale split items from previous vision
+                }
                 else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
             }.onFailure { throwable ->
                 isProcessing = false
@@ -663,21 +668,16 @@ fun CaptureScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (isProcessing) {
-                            ProcessingStatusCard()
-                        }
+                    if (isProcessing) {
+                        ProcessingStatusCard()
+                    }
 
-                        if (errorMessage.isNotBlank()) {
-                            ErrorMessageCard(errorMessage)
-                        }
+                    if (errorMessage.isNotBlank()) {
+                        ErrorMessageCard(errorMessage)
+                    }
 
                         // Side-by-side: labels on top, boxes below, buttons at bottom
                         // Determine left label based on how we got here
@@ -709,43 +709,48 @@ fun CaptureScreen(
                                     Text(
                                         text = "拆分",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                     )
                                     Switch(
                                         checked = isSplitMode,
                                         onCheckedChange = { isSplitMode = it },
-                                        modifier = Modifier.height(24.dp)
+                                        modifier = Modifier
+                                            .scale(0.6f)
+                                            .height(20.dp)
                                     )
                                 }
                             }
                         }
 
-                        // Two aligned boxes
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            // Left: editable OCR text
-                            OutlinedTextField(
-                                value = ocrText,
-                                onValueChange = {
-                                    ocrText = it
-                                    extractionResult = null
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(240.dp),
+                    // Two aligned boxes — fill available space
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        // Left: editable OCR text
+                        OutlinedTextField(
+                            value = ocrText,
+                            onValueChange = {
+                                ocrText = it
+                                extractionResult = null
+                                visionItems = emptyList()
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                                 placeholder = { Text("识别结果将显示在这里\n可编辑文本内容", style = MaterialTheme.typography.bodySmall) },
                                 textStyle = MaterialTheme.typography.bodySmall,
                                 shape = RoundedCornerShape(12.dp)
                             )
 
-                            // Right: AI result (summary or split items)
-                            Card(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(240.dp),
+                        // Right: AI result (summary or split items)
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                                 ),
@@ -917,7 +922,6 @@ fun CaptureScreen(
                                 }
                             }
                         }
-                    }
 
                     ImageSourceButtons(
                         rowModifier = Modifier
