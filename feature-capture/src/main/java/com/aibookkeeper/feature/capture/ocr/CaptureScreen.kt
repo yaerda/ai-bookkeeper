@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -613,14 +614,10 @@ fun CaptureScreen(
 
     // ── Fullscreen text editor ──
     if (showFullscreenEditor) {
-        val originalText = remember { ocrText }
         fun dismissEditor() {
             showFullscreenEditor = false
-            if (ocrText != originalText) {
-                extractionResult = null
-                visionItems = emptyList()
-                splitTexts = ocrText.lines().filter { it.isNotBlank() }
-            }
+            // Always sync splitTexts from edited text, but keep visionItems
+            splitTexts = ocrText.lines().filter { it.isNotBlank() }
         }
         Dialog(
             onDismissRequest = { dismissEditor() },
@@ -673,12 +670,17 @@ fun CaptureScreen(
                     )
                 }
             ) { padding ->
-                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(padding)
                         .padding(horizontal = 16.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
+                    if (isProcessing) {
+                        ProcessingStatusCard()
+                    }
+
                     if (errorMessage.isNotBlank()) {
                         ErrorMessageCard(errorMessage)
                     }
@@ -729,12 +731,11 @@ fun CaptureScreen(
 
                     // Two aligned boxes — fill available space
                     if (isSplitMode) {
-                        // Split mode: editable item rows aligned with extraction
+                        // Split mode: item rows
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(0.5f, fill = false)
-                                .verticalScroll(rememberScrollState()),
+                                .defaultMinSize(minHeight = 168.dp),
                             verticalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
                             if (visionItems.isNotEmpty()) {
@@ -809,11 +810,11 @@ fun CaptureScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(0.5f, fill = false),
+                                .defaultMinSize(minHeight = 168.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.Top
                         ) {
-                            // Left: editable OCR text
+                            // Left: editable OCR text (7 lines default)
                             OutlinedTextField(
                                 value = ocrText,
                                 onValueChange = {
@@ -824,9 +825,10 @@ fun CaptureScreen(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxHeight(),
+                                    .defaultMinSize(minHeight = 168.dp),
                                 placeholder = { Text("识别结果将显示在这里\n可编辑文本内容", style = MaterialTheme.typography.bodySmall) },
                                 textStyle = MaterialTheme.typography.bodySmall,
+                                minLines = 7,
                                 shape = RoundedCornerShape(12.dp)
                             )
 
@@ -834,7 +836,7 @@ fun CaptureScreen(
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxHeight(),
+                                    .defaultMinSize(minHeight = 168.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                                 ),
@@ -842,22 +844,31 @@ fun CaptureScreen(
                             ) {
                                 Column(
                                     modifier = Modifier
-                                        .fillMaxSize()
+                                        .fillMaxWidth()
                                         .padding(12.dp),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     if (extractionResult != null) {
                                         val data = extractionResult!!
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (data.type == "EXPENSE") "支出" else "收入",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                            )
+                                            Text(
+                                                text = "¥${"%.2f".format(data.amount ?: 0.0)}",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
                                         Text(
-                                            text = "${if (data.type == "EXPENSE") "支出" else "收入"} · ${data.category}",
+                                            text = data.category,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                        Text(
-                                            text = "¥${"%.2f".format(data.amount ?: 0.0)}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer
                                         )
                                         if (!data.merchantName.isNullOrBlank()) {
@@ -979,35 +990,12 @@ fun CaptureScreen(
                             }
                         }
 
-                    Spacer(modifier = Modifier.weight(1f))
-
                     ImageSourceButtons(
                         rowModifier = Modifier
                             .background(MaterialTheme.colorScheme.surface)
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
-
-                // Loading overlay
-                if (isProcessing) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator()
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = processingLabel.ifBlank { "AI 识别中..." },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-                } // Box
             }
         }
     }
