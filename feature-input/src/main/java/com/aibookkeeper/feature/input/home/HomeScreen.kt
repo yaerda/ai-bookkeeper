@@ -821,7 +821,7 @@ private fun AiActionButton(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("🎙 录音中...点击结束", color = Color.White)
+                    Text("🎙 录音中...松开结束", color = Color.White)
                 }
                 aiStatus is AiStatus.Processing -> {
                     CircularProgressIndicator(
