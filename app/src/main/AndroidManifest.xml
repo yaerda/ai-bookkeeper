@@ -95,6 +95,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Screenshot capture foreground service (Android 14+ media projection) -->
+        <service
+            android:name="com.aibookkeeper.feature.capture.screenshot.ScreenshotForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <!-- Persistent notification foreground service -->
         <service
             android:name="com.aibookkeeper.feature.capture.notification.PaymentNotificationService"

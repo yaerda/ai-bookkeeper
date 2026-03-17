@@ -8,7 +8,9 @@ import android.hardware.display.DisplayManager
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,6 +31,12 @@ import kotlinx.coroutines.withContext
 
 class ScreenshotCaptureActivity : ComponentActivity() {
 
+    companion object {
+        private const val TAG = "ScreenshotCapture"
+    }
+
+    private var foregroundServiceStarted = false
+
     private val mediaProjectionManager by lazy(LazyThreadSafetyMode.NONE) {
         getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
     }
@@ -39,6 +47,7 @@ class ScreenshotCaptureActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK && result.data != null) {
             captureScreenshot(result.resultCode, result.data!!)
         } else {
+            Log.w(TAG, "Screen capture permission denied by user")
             Toast.makeText(this, "截图权限被拒绝", Toast.LENGTH_SHORT).show()
             finish()
         }
@@ -49,11 +58,35 @@ class ScreenshotCaptureActivity : ComponentActivity() {
         projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (foregroundServiceStarted) {
+            ScreenshotForegroundService.stop(this)
+            foregroundServiceStarted = false
+        }
+    }
+
     private fun captureScreenshot(resultCode: Int, data: Intent) {
+        // Android 14+ requires a foreground service with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        // before getMediaProjection() can be called.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                ScreenshotForegroundService.start(this)
+                foregroundServiceStarted = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start foreground service: ${e.javaClass.simpleName}", e)
+                Toast.makeText(this, "无法截屏: ${e.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
+                finish()
+                return
+            }
+        }
+
         val mediaProjection = try {
             mediaProjectionManager.getMediaProjection(resultCode, data)
         } catch (e: Exception) {
-            Toast.makeText(this, "无法启动截图", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "getMediaProjection failed: ${e.javaClass.simpleName}", e)
+            Toast.makeText(this, "无法截屏: ${e.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
+            stopForegroundServiceIfNeeded()
             finish()
             return
         }
@@ -62,25 +95,36 @@ class ScreenshotCaptureActivity : ComponentActivity() {
         val height = metrics.heightPixels
         val density = metrics.densityDpi
         val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-        val virtualDisplay = mediaProjection.createVirtualDisplay(
-            "ScreenCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader.surface,
-            null,
-            null
-        )
+
+        val virtualDisplay = try {
+            mediaProjection.createVirtualDisplay(
+                "ScreenCapture",
+                width,
+                height,
+                density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface,
+                null,
+                null
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "createVirtualDisplay failed: ${e.javaClass.simpleName}", e)
+            Toast.makeText(this, "无法截屏: ${e.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
+            imageReader.close()
+            mediaProjection.stop()
+            stopForegroundServiceIfNeeded()
+            finish()
+            return
+        }
 
         lifecycleScope.launch {
             try {
-                delay(300)
+                delay(500)
                 var image: Image? = null
-                for (attempt in 0 until 5) {
+                for (attempt in 0 until 10) {
                     image = imageReader.acquireLatestImage()
                     if (image != null) break
-                    if (attempt < 4) {
+                    if (attempt < 9) {
                         delay(100)
                     }
                 }
@@ -94,20 +138,30 @@ class ScreenshotCaptureActivity : ComponentActivity() {
                 }
 
                 if (bitmap == null) {
-                    Toast.makeText(this@ScreenshotCaptureActivity, "截图失败", Toast.LENGTH_SHORT).show()
+                    Log.e(TAG, "Failed to acquire image after 10 attempts")
+                    Toast.makeText(this@ScreenshotCaptureActivity, "截图失败：无法获取屏幕图像", Toast.LENGTH_SHORT).show()
                     finish()
                     return@launch
                 }
 
                 processScreenshot(bitmap)
             } catch (e: Exception) {
-                Toast.makeText(this@ScreenshotCaptureActivity, "截图失败", Toast.LENGTH_SHORT).show()
+                Log.e(TAG, "Screenshot capture failed: ${e.javaClass.simpleName}", e)
+                Toast.makeText(this@ScreenshotCaptureActivity, "截图失败: ${e.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
                 finish()
             } finally {
                 imageReader.close()
                 virtualDisplay.release()
                 mediaProjection.stop()
+                stopForegroundServiceIfNeeded()
             }
+        }
+    }
+
+    private fun stopForegroundServiceIfNeeded() {
+        if (foregroundServiceStarted) {
+            ScreenshotForegroundService.stop(this)
+            foregroundServiceStarted = false
         }
     }
 
