@@ -277,20 +277,54 @@ fun CaptureScreen(
         savedMessage = ""
 
         coroutineScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val categoryNames = categoryProvider.getCategoryNames(emptyList())
-                    strategyManager.extractFromOcr(text, categoryNames)
+            val categoryNames = withContext(Dispatchers.IO) {
+                categoryProvider.getCategoryNames(emptyList())
+            }
+
+            if (isSplitMode) {
+                // Split mode: extract each line separately
+                val lines = text.lines().filter { it.isNotBlank() }
+                val newItems = mutableListOf<ExtractionResult>()
+                for (line in lines) {
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) {
+                            strategyManager.extractFromOcr(line, categoryNames)
+                        }
+                    }.getOrNull()
+                    if (result != null && result.isSuccess) {
+                        result.getOrNull()?.let { newItems.add(it) }
+                    }
                 }
-            }.onSuccess { result ->
                 isProcessing = false
-                if (result.isSuccess) {
-                    extractionResult = result.getOrNull()
+                if (newItems.isNotEmpty()) {
+                    visionItems = newItems
+                    splitTexts = lines
+                    // Also set summary
+                    val totalAmount = newItems.sumOf { it.amount ?: 0.0 }
+                    extractionResult = newItems.first().copy(
+                        amount = totalAmount,
+                        note = "${newItems.size}项合计"
+                    )
+                } else {
+                    errorMessage = "AI 提取失败，请重试"
                 }
-                else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
-            }.onFailure { throwable ->
-                isProcessing = false
-                errorMessage = throwable.message ?: "提取失败，请重试"
+            } else {
+                // Summary mode: extract whole text as one
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        strategyManager.extractFromOcr(text, categoryNames)
+                    }
+                }.onSuccess { result ->
+                    isProcessing = false
+                    if (result.isSuccess) {
+                        extractionResult = result.getOrNull()
+                    } else {
+                        errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
+                    }
+                }.onFailure { throwable ->
+                    isProcessing = false
+                    errorMessage = throwable.message ?: "提取失败，请重试"
+                }
             }
         }
     }
