@@ -286,8 +286,6 @@ fun CaptureScreen(
                 isProcessing = false
                 if (result.isSuccess) {
                     extractionResult = result.getOrNull()
-                    visionItems = emptyList() // Clear stale split items from previous vision
-                    splitTexts = emptyList()
                 }
                 else errorMessage = "AI 提取失败: ${result.exceptionOrNull()?.message ?: "未知错误"}"
             }.onFailure { throwable ->
@@ -614,10 +612,14 @@ fun CaptureScreen(
 
     // ── Fullscreen text editor ──
     if (showFullscreenEditor) {
+        val originalText = remember { ocrText }
         fun dismissEditor() {
             showFullscreenEditor = false
-            // Always sync splitTexts from edited text, but keep visionItems
             splitTexts = ocrText.lines().filter { it.isNotBlank() }
+            // Auto re-extract if text was changed
+            if (ocrText != originalText && ocrText.isNotBlank()) {
+                runAiFromText(ocrText)
+            }
         }
         Dialog(
             onDismissRequest = { dismissEditor() },
@@ -674,9 +676,14 @@ fun CaptureScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(horizontal = 16.dp)
-                        .verticalScroll(rememberScrollState())
                 ) {
+                    // Scrollable content area
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 16.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
                     if (isProcessing) {
                         ProcessingStatusCard()
                     }
@@ -990,12 +997,15 @@ fun CaptureScreen(
                             }
                         }
 
+                    } // end scrollable Column
+
+                    // Fixed at bottom
                     ImageSourceButtons(
                         rowModifier = Modifier
                             .background(MaterialTheme.colorScheme.surface)
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     )
-                }
+                } // end outer Column
             }
         }
     }
