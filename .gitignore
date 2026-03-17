@@ -15,3 +15,6 @@ captures/
 logs/
 
 test-images/
+release.keystore
+*.keystore
+*.jks

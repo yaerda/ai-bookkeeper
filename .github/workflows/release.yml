@@ -28,13 +28,22 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      - name: Build and test
-        run: ./gradlew build --no-daemon --stacktrace
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Run tests
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
       - name: Get APK path
         id: apk
         run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          APK_PATH=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           APK_NAME=$(basename "$APK_PATH")
           echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$APK_NAME" >> "$GITHUB_OUTPUT"

@@ -13,6 +13,15 @@ android {
     namespace = "com.aibookkeeper"
     compileSdk = 35
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../release.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "aibookkeeper2026"
+            keyAlias = "ai-bookkeeper"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "aibookkeeper2026"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.aibookkeeper"
         minSdk = 26
@@ -44,7 +53,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

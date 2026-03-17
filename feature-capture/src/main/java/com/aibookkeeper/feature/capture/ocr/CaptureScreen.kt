@@ -136,16 +136,26 @@ fun CaptureScreen(
 
     val hasContent = ocrText.isNotBlank() || extractionResult != null || savedMessage.isNotBlank()
 
-    // Regex to extract amount from structured text like "商品名 ¥26.00" or "¥26.00"
-    val amountRegex = remember { Regex("[¥￥]\\s*(\\d+\\.?\\d*)") }
+    // Regex to extract amount and sign from structured text like "商品名 ¥26.00" or "+¥26.00" or "-¥26.00"
+    val amountRegex = remember { Regex("([+-])?\\s*[¥￥]\\s*(\\d+\\.?\\d*)") }
 
     // Parse amounts from text using regex, update right side results
     fun updateResultsFromText(text: String) {
         val lines = text.lines().filter { it.isNotBlank() }
-        val amounts = lines.map { line ->
-            amountRegex.find(line)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+
+        data class ParsedItem(val amount: Double, val type: String)
+
+        val parsed = lines.map { line ->
+            val match = amountRegex.find(line)
+            val rawAmount = match?.groupValues?.get(2)?.toDoubleOrNull() ?: 0.0
+            val sign = match?.groupValues?.get(1) ?: ""
+            val type = if (sign == "+") "INCOME" else "EXPENSE"
+            ParsedItem(rawAmount, type)
         }
-        val totalAmount = amounts.sum()
+
+        val totalExpense = parsed.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+        val totalIncome = parsed.filter { it.type == "INCOME" }.sumOf { it.amount }
+        val totalAmount = totalExpense + totalIncome
 
         // Update summary result
         extractionResult = extractionResult?.copy(amount = totalAmount)
@@ -157,8 +167,10 @@ fun CaptureScreen(
         // Update split items
         if (visionItems.isNotEmpty()) {
             visionItems = visionItems.mapIndexed { index, item ->
+                val p = parsed.getOrNull(index)
                 item.copy(
-                    amount = amounts.getOrElse(index) { item.amount ?: 0.0 },
+                    amount = p?.amount ?: item.amount ?: 0.0,
+                    type = p?.type ?: item.type,
                     note = lines.getOrNull(index)?.replace(amountRegex, "")?.trim() ?: item.note
                 )
             }
@@ -468,9 +480,9 @@ fun CaptureScreen(
         } catch (_: Exception) {
             now
         }
-        val amount = data.amount ?: 0.0
+        val amount = Math.abs(data.amount ?: 0.0) // Always store positive, type indicates direction
 
-        if (amount <= 0.0) {
+        if (amount == 0.0) {
             -1L
         } else {
             transactionRepository.create(
@@ -523,6 +535,7 @@ fun CaptureScreen(
             var successCount = 0
             var totalAmount = 0.0
             for (item in items) {
+                android.util.Log.d("CaptureScreen", "Saving item: amount=${item.amount}, type=${item.type}, category=${item.category}, note=${item.note}")
                 val txId: Long = try {
                     withContext(Dispatchers.IO) { doSaveTransaction(item) }
                 } catch (e: Exception) {
