@@ -677,20 +677,20 @@ fun CaptureScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
                     if (errorMessage.isNotBlank()) {
                         ErrorMessageCard(errorMessage)
                     }
 
-                        // Side-by-side: labels on top, boxes below, buttons at bottom
-                        // Determine left label based on how we got here
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Labels row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                             // Left label
                             Text(
                                 text = "📝 识别结果",
@@ -902,7 +902,7 @@ fun CaptureScreen(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("全屏编辑", style = MaterialTheme.typography.labelMedium)
+                                Text("编辑", style = MaterialTheme.typography.labelMedium)
                             }
                             // Compact "AI提取" button
                             FilledTonalButton(
@@ -978,6 +978,8 @@ fun CaptureScreen(
                                 }
                             }
                         }
+
+                    Spacer(modifier = Modifier.weight(1f))
 
                     ImageSourceButtons(
                         rowModifier = Modifier
