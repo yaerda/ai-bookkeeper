@@ -50,7 +50,7 @@ fun SplashScreen(
             Text(
                 text = "v$versionName",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.5f),
+                color = Color(0xFF888888),
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
