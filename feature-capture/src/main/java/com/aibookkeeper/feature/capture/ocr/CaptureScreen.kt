@@ -39,6 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -46,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -59,6 +61,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -113,6 +116,7 @@ fun CaptureScreen(
     var errorMessage by remember { mutableStateOf("") }
     var extractionResult by remember { mutableStateOf<ExtractionResult?>(null) }
     var visionItems by remember { mutableStateOf<List<ExtractionResult>>(emptyList()) }
+    var isSplitMode by remember { mutableStateOf(false) }
     var savedMessage by remember { mutableStateOf("") }
     var cameraImageFile by remember { mutableStateOf<File?>(null) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -402,55 +406,78 @@ fun CaptureScreen(
         }
     }
 
+    val doSaveTransaction: suspend (ExtractionResult) -> Long = { data ->
+        val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
+            ?: categoryDao.findByNameAndType("其他", data.type)?.id
+        val now = java.time.LocalDateTime.now()
+        val parsedDate = try {
+            java.time.LocalDate.parse(data.date).atStartOfDay()
+        } catch (_: Exception) {
+            now
+        }
+
+        transactionRepository.create(
+            com.aibookkeeper.core.data.model.Transaction(
+                amount = data.amount ?: 0.0,
+                type = com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type),
+                categoryId = categoryId,
+                merchantName = data.merchantName,
+                note = data.note,
+                originalInput = ocrText.ifBlank { "AI Vision: image" },
+                date = parsedDate,
+                createdAt = now,
+                updatedAt = now,
+                source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
+                status = if (data.confidence >= 0.7f)
+                    com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
+                else
+                    com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
+                syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
+                aiConfidence = data.confidence
+            )
+        ).getOrElse { -1L }
+    }
+
     fun confirmAndSave(data: ExtractionResult) {
         isProcessing = true
         processingLabel = "正在保存..."
 
         coroutineScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    // Find category or fallback to "其他"
-                    val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
-                        ?: categoryDao.findByNameAndType("其他", data.type)?.id
-                    val now = java.time.LocalDateTime.now()
-                    val parsedDate = try {
-                        java.time.LocalDate.parse(data.date).atStartOfDay()
-                    } catch (_: Exception) {
-                        now
-                    }
+            val txId: Long = try {
+                withContext(Dispatchers.IO) { doSaveTransaction(data) }
+            } catch (_: Exception) { -1L }
 
-                    transactionRepository.create(
-                        com.aibookkeeper.core.data.model.Transaction(
-                            amount = data.amount ?: 0.0,
-                            type = com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type),
-                            categoryId = categoryId,
-                            merchantName = data.merchantName,
-                            note = data.note,
-                            originalInput = ocrText.ifBlank { "AI Vision: image" },
-                            date = parsedDate,
-                            createdAt = now,
-                            updatedAt = now,
-                            source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
-                            status = if (data.confidence >= 0.7f)
-                                com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
-                            else
-                                com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
-                            syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
-                            aiConfidence = data.confidence
-                        )
-                    )
-                }
-            }.onSuccess { result ->
-                isProcessing = false
-                val txId = result.getOrElse { -1L }
+            isProcessing = false
+            if (txId > 0) {
+                savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
+            } else {
+                errorMessage = "保存失败，请重试"
+            }
+        }
+    }
+
+    fun confirmAndSaveAll(items: List<ExtractionResult>) {
+        if (items.isEmpty()) return
+        isProcessing = true
+        processingLabel = "正在保存 ${items.size} 笔..."
+
+        coroutineScope.launch {
+            var successCount = 0
+            var totalAmount = 0.0
+            for (item in items) {
+                val txId: Long = try {
+                    withContext(Dispatchers.IO) { doSaveTransaction(item) }
+                } catch (_: Exception) { -1L }
                 if (txId > 0) {
-                    savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
-                } else {
-                    errorMessage = "保存失败，请重试"
+                    successCount++
+                    totalAmount += (item.amount ?: 0.0)
                 }
-            }.onFailure { throwable ->
-                isProcessing = false
-                errorMessage = "保存失败: ${throwable.message ?: "未知错误"}"
+            }
+            isProcessing = false
+            if (successCount > 0) {
+                savedMessage = "✅ 已保存 $successCount 笔，共 ¥${"%.2f".format(totalAmount)}"
+            } else {
+                errorMessage = "保存失败，请重试"
             }
         }
     }
@@ -643,7 +670,8 @@ fun CaptureScreen(
                         // Determine left label based on how we got here
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Left label
                             Text(
@@ -652,14 +680,31 @@ fun CaptureScreen(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f)
                             )
-                            // Right label
-                            Text(
-                                text = "🤖 AI 结果",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.weight(1f)
-                            )
+                            // Right label with split toggle
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (isSplitMode) "📋 逐项" else "🤖 汇总",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "拆分",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Switch(
+                                        checked = isSplitMode,
+                                        onCheckedChange = { isSplitMode = it },
+                                        modifier = Modifier.height(24.dp)
+                                    )
+                                }
+                            }
                         }
 
                         // Two aligned boxes
@@ -683,7 +728,7 @@ fun CaptureScreen(
                                 shape = RoundedCornerShape(12.dp)
                             )
 
-                            // Right: AI result
+                            // Right: AI result (summary or split items)
                             Card(
                                 modifier = Modifier
                                     .weight(1f)
@@ -696,10 +741,35 @@ fun CaptureScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(12.dp),
+                                        .padding(12.dp)
+                                        .verticalScroll(rememberScrollState()),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    if (extractionResult != null) {
+                                    if (isSplitMode && visionItems.isNotEmpty()) {
+                                        // Split mode: show each item
+                                        visionItems.forEachIndexed { index, item ->
+                                            if (index > 0) {
+                                                HorizontalDivider(
+                                                    modifier = Modifier.padding(vertical = 2.dp),
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
+                                                )
+                                            }
+                                            Text(
+                                                text = "${if (item.type == "INCOME") "+" else "-"}¥${"%.2f".format(item.amount ?: 0.0)}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (item.type == "INCOME")
+                                                    Color(0xFF4CAF50)
+                                                else MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                            Text(
+                                                text = "${item.category}${if (!item.note.isNullOrBlank()) " · ${item.note}" else ""}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                            )
+                                        }
+                                    } else if (extractionResult != null) {
+                                        // Summary mode
                                         val data = extractionResult!!
                                         Text(
                                             text = "¥${"%.2f".format(data.amount ?: 0.0)}",
@@ -777,12 +847,22 @@ fun CaptureScreen(
                                 Text("AI提取", style = MaterialTheme.typography.labelSmall)
                             }
                             Button(
-                                onClick = { extractionResult?.let { confirmAndSave(it) } },
-                                enabled = extractionResult != null && !isProcessing,
+                                onClick = {
+                                    if (isSplitMode && visionItems.isNotEmpty()) {
+                                        confirmAndSaveAll(visionItems)
+                                    } else {
+                                        extractionResult?.let { confirmAndSave(it) }
+                                    }
+                                },
+                                enabled = (if (isSplitMode) visionItems.isNotEmpty() else extractionResult != null) && !isProcessing,
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("✨ AI记账", style = MaterialTheme.typography.labelMedium)
+                                Text(
+                                    if (isSplitMode && visionItems.size > 1) "✨ 保存${visionItems.size}笔"
+                                    else "✨ AI记账",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
                             }
                         }
 
