@@ -415,14 +415,8 @@ fun CaptureScreen(
         val categoryId = categoryDao.findByNameAndType(data.category, type.name)?.id
             ?: categoryDao.findByNameAndType("其他", type.name)?.id
         val now = java.time.LocalDateTime.now()
-        // Preserve original bill date from AI, use current time portion
         val parsedDate = try {
-            val d = java.time.LocalDate.parse(data.date)
-            if (d == java.time.LocalDate.now()) {
-                now // Today: use full current datetime
-            } else {
-                d.atTime(12, 0) // Past date: use noon to avoid 00:00 display
-            }
+            java.time.LocalDate.parse(data.date).atStartOfDay()
         } catch (_: Exception) {
             now
         }

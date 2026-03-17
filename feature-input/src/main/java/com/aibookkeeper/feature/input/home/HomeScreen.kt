@@ -666,7 +666,11 @@ private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit 
                 style = MaterialTheme.typography.bodyLarge
             )
             val noteText = transaction.note
-            val dateText = transaction.date.format(DateTimeFormatter.ofPattern("M/d HH:mm"))
+            val isTimeZero = transaction.date.hour == 0 && transaction.date.minute == 0
+            val dateText = if (isTimeZero)
+                transaction.date.format(DateTimeFormatter.ofPattern("M/d"))
+            else
+                transaction.date.format(DateTimeFormatter.ofPattern("M/d HH:mm"))
             val subtitle = if (!noteText.isNullOrBlank()) "$noteText · $dateText" else dateText
             Text(
                 text = subtitle,

@@ -370,7 +370,11 @@ private fun TransactionItem(
                 text = transaction.categoryName ?: "未分类",
                 style = MaterialTheme.typography.bodyLarge
             )
-            val timeText = transaction.date.format(java.time.format.DateTimeFormatter.ofPattern("M/d HH:mm"))
+            val isTimeZero = transaction.date.hour == 0 && transaction.date.minute == 0
+            val timeText = if (isTimeZero)
+                transaction.date.format(java.time.format.DateTimeFormatter.ofPattern("M/d"))
+            else
+                transaction.date.format(java.time.format.DateTimeFormatter.ofPattern("M/d HH:mm"))
             val subtitle = buildString {
                 if (transaction.note?.isNotBlank() == true) {
                     append(transaction.note)
