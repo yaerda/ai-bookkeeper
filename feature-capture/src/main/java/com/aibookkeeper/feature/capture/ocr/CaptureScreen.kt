@@ -407,35 +407,45 @@ fun CaptureScreen(
     }
 
     val doSaveTransaction: suspend (ExtractionResult) -> Long = { data ->
-        val categoryId = categoryDao.findByNameAndType(data.category, data.type)?.id
-            ?: categoryDao.findByNameAndType("其他", data.type)?.id
+        val type = try {
+            com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type)
+        } catch (_: Exception) {
+            com.aibookkeeper.core.data.model.TransactionType.EXPENSE
+        }
+        val categoryId = categoryDao.findByNameAndType(data.category, type.name)?.id
+            ?: categoryDao.findByNameAndType("其他", type.name)?.id
         val now = java.time.LocalDateTime.now()
         val parsedDate = try {
             java.time.LocalDate.parse(data.date).atStartOfDay()
         } catch (_: Exception) {
             now
         }
+        val amount = data.amount ?: 0.0
 
-        transactionRepository.create(
-            com.aibookkeeper.core.data.model.Transaction(
-                amount = data.amount ?: 0.0,
-                type = com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type),
-                categoryId = categoryId,
-                merchantName = data.merchantName,
-                note = data.note,
-                originalInput = ocrText.ifBlank { "AI Vision: image" },
-                date = parsedDate,
-                createdAt = now,
-                updatedAt = now,
-                source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
-                status = if (data.confidence >= 0.7f)
-                    com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
-                else
-                    com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
-                syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
-                aiConfidence = data.confidence
-            )
-        ).getOrElse { -1L }
+        if (amount <= 0.0) {
+            -1L
+        } else {
+            transactionRepository.create(
+                com.aibookkeeper.core.data.model.Transaction(
+                    amount = amount,
+                    type = type,
+                    categoryId = categoryId,
+                    merchantName = data.merchantName,
+                    note = data.note,
+                    originalInput = ocrText.ifBlank { "AI Vision: image" },
+                    date = parsedDate,
+                    createdAt = now,
+                    updatedAt = now,
+                    source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
+                    status = if (data.confidence >= 0.7f)
+                        com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
+                    else
+                        com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
+                    syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
+                    aiConfidence = data.confidence
+                )
+            ).getOrElse { -1L }
+        }
     }
 
     fun confirmAndSave(data: ExtractionResult) {
@@ -467,7 +477,10 @@ fun CaptureScreen(
             for (item in items) {
                 val txId: Long = try {
                     withContext(Dispatchers.IO) { doSaveTransaction(item) }
-                } catch (_: Exception) { -1L }
+                } catch (e: Exception) {
+                    android.util.Log.e("CaptureScreen", "Save failed for item: ${item.note}", e)
+                    -1L
+                }
                 if (txId > 0) {
                     successCount++
                     totalAmount += (item.amount ?: 0.0)

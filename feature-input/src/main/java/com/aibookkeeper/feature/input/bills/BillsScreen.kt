@@ -370,14 +370,20 @@ private fun TransactionItem(
                 text = transaction.categoryName ?: "未分类",
                 style = MaterialTheme.typography.bodyLarge
             )
-            if (transaction.note?.isNotBlank() == true) {
-                Text(
-                    text = transaction.note.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
+            val timeText = transaction.date.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+            val subtitle = buildString {
+                if (transaction.note?.isNotBlank() == true) {
+                    append(transaction.note)
+                    append(" · ")
+                }
+                append(timeText)
             }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
 
         Text(
