@@ -412,9 +412,13 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-            // Version info
+            // Version info (dynamic from PackageManager)
+            val versionName = try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
+            } catch (_: Exception) { "?" }
+
             Text(
-                text = "v1.0.1",
+                text = "v$versionName",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier

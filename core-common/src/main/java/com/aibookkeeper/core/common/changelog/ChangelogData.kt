@@ -8,6 +8,19 @@ data class ChangelogEntry(
 
 val CHANGELOG = listOf(
     ChangelogEntry(
+        version = "1.0.2",
+        date = "2026-03-17",
+        highlights = listOf(
+            "🤖 AI 拍照识别升级：两步提取（视觉识别 → 文本提取），结果更精准",
+            "📋 新增拆分/汇总切换：购物小票可逐项记账或汇总记账",
+            "📊 消费趋势柱状图按分类颜色区分",
+            "🎙 语音输入改用本地 SpeechRecognizer，无需云端配置",
+            "📝 手动记账改为全屏弹窗，操作更流畅",
+            "🖼️ 图片预览全量显示，AI 识别返回整理后的文字",
+            "🔧 修复分类匹配、保存失败、图片格式兼容等问题"
+        )
+    ),
+    ChangelogEntry(
         version = "1.0.1",
         date = "2026-03-16",
         highlights = listOf(

@@ -27,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.aibookkeeper.core.common.changelog.CHANGELOG
@@ -35,7 +36,10 @@ import com.aibookkeeper.core.common.changelog.ChangelogEntry
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChangelogScreen(navController: NavController) {
-    val currentVersion = CHANGELOG.firstOrNull()?.version ?: "1.0.1"
+    val context = LocalContext.current
+    val currentVersion = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
+    } catch (_: Exception) { CHANGELOG.firstOrNull()?.version ?: "?" }
 
     Scaffold(
         topBar = {
