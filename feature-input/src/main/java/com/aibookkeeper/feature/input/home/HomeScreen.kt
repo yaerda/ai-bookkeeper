@@ -1,14 +1,17 @@
 package com.aibookkeeper.feature.input.home
 
 import android.Manifest
-import android.content.ActivityNotFoundException
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -254,19 +257,67 @@ fun HomeScreen(
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var pendingVoiceRequest by remember { mutableStateOf(false) }
-        var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
-        var recordingFile by remember { mutableStateOf<File?>(null) }
         var isRecording by remember { mutableStateOf(false) }
         var isImageOcrProcessing by remember { mutableStateOf(false) }
-        val voiceInputMode = viewModel.currentVoiceInputMode()
 
-        val speechIntentLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            viewModel.handleSystemVoiceRecognitionResult(
-                resultCode = result.resultCode,
-                data = result.data
-            )
+        // Local SpeechRecognizer (no system UI)
+        val speechRecognizer = remember {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                speechRecognizer.destroy()
+            }
+        }
+
+        remember(speechRecognizer) {
+            speechRecognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onResults(results: Bundle?) {
+                    isRecording = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()?.trim()
+                    if (!text.isNullOrBlank()) {
+                        aiInput = if (aiInput.isBlank()) text else "$aiInput\n$text"
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onError(error: Int) {
+                    isRecording = false
+                    val msg = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音内容"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
+                        SpeechRecognizer.ERROR_AUDIO -> "录音错误"
+                        SpeechRecognizer.ERROR_NETWORK -> "网络不可用，请检查连接"
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+                        else -> "语音识别失败 (错误码: $error)"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+                override fun onReadyForSpeech(params: Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { isRecording = false }
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            true
+        }
+
+        fun startLocalSpeechRecognition() {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            }
+            isRecording = true
+            speechRecognizer.startListening(intent)
+        }
+
+        fun stopLocalSpeechRecognition() {
+            speechRecognizer.stopListening()
+            isRecording = false
         }
         val photoPickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.PickVisualMedia()
@@ -291,80 +342,24 @@ fun HomeScreen(
             }
         }
 
-        fun startCloudRecording() {
-            if (!viewModel.isCloudVoiceConfigured()) {
-                Toast.makeText(
-                    context,
-                    "请先到设置页填写 Azure 语音 Deployment，例如 gpt-4o-mini-transcribe。",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
-            }
-
-            val outputDir = File(context.cacheDir, "voice-input").apply { mkdirs() }
-            val outputFile = File.createTempFile("voice_", ".m4a", outputDir)
-
-            runCatching {
-                MediaRecorder().apply {
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setAudioChannels(1)
-                    setAudioSamplingRate(16_000)
-                    setAudioEncodingBitRate(128_000)
-                    setOutputFile(outputFile.absolutePath)
-                    prepare()
-                    start()
-                }
-            }.onSuccess { recorder ->
-                activeRecorder = recorder
-                recordingFile = outputFile
-                isRecording = true
-                Toast.makeText(context, "开始录音，再点一次结束", Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                outputFile.delete()
-                Toast.makeText(context, "录音启动失败，请重试", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        fun stopCloudRecording() {
-            val recorder = activeRecorder ?: return
-            val outputFile = recordingFile
-            val stopResult = runCatching { recorder.stop() }
-            recorder.release()
-            activeRecorder = null
-            isRecording = false
-
-            if (stopResult.isFailure || outputFile == null || !outputFile.exists() || outputFile.length() == 0L) {
-                outputFile?.delete()
-                recordingFile = null
-                Toast.makeText(context, "录音失败，请重新录一次", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            recordingFile = null
-            Toast.makeText(context, "录音完成，正在云端识别...", Toast.LENGTH_SHORT).show()
-            viewModel.transcribeVoiceInput(outputFile)
-        }
-
         val audioPermissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
             if (granted) {
                 pendingVoiceRequest = false
-                startCloudRecording()
+                startLocalSpeechRecognition()
             } else {
                 pendingVoiceRequest = false
                 Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
             }
         }
 
-        fun startCloudRecordingWithPermissionGuard() {
+        fun startVoiceWithPermissionGuard() {
             if (context.hasAudioPermission()) {
                 if (isRecording) {
-                    stopCloudRecording()
+                    stopLocalSpeechRecognition()
                 } else {
-                    startCloudRecording()
+                    startLocalSpeechRecognition()
                 }
             } else if (!pendingVoiceRequest) {
                 pendingVoiceRequest = true
@@ -372,37 +367,12 @@ fun HomeScreen(
             }
         }
 
-        DisposableEffect(Unit) {
-            onDispose {
-                activeRecorder?.let { recorder ->
-                    runCatching {
-                        if (isRecording) {
-                            recorder.stop()
-                        }
-                    }
-                    recorder.release()
-                }
-                recordingFile?.delete()
-            }
-        }
-
         // Auto-start voice recording if opened via long-press
-        // Prefer in-app cloud recording to avoid system dialog popup
         if (startWithVoice) {
             LaunchedEffect(Unit) {
                 startWithVoice = false
                 kotlinx.coroutines.delay(600)
-                if (viewModel.isCloudVoiceConfigured()) {
-                    startCloudRecordingWithPermissionGuard()
-                } else if (voiceInputMode == VoiceInputMode.SYSTEM) {
-                    try {
-                        speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                    } catch (_: ActivityNotFoundException) {
-                        Toast.makeText(context, "🎙 语音输入不可用", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    Toast.makeText(context, "🎙 语音输入不可用，请到设置页配置 Azure 语音", Toast.LENGTH_SHORT).show()
-                }
+                startVoiceWithPermissionGuard()
             }
         }
 
@@ -528,30 +498,6 @@ fun HomeScreen(
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
-                    isRecording -> {
-                        Text(
-                            text = "🎙 正在录音，再点一次按钮结束",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    uiState.voiceStatus is VoiceStatus.Processing -> {
-                        Text(
-                            text = "☁️ 正在上传录音并进行 Azure 云端识别...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    voiceInputMode == VoiceInputMode.CLOUD -> {
-                        Text(
-                            text = "☁️ 当前使用 Azure 云端语音识别作为兜底",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
                 }
 
                 // Unified AI button: tap = submit, long-press = voice input
@@ -560,26 +506,12 @@ fun HomeScreen(
                     isRecording = isRecording,
                     aiStatus = uiState.aiStatus,
                     voiceStatus = uiState.voiceStatus,
-                    voiceInputMode = voiceInputMode,
                     onSubmit = { viewModel.submitAiInput(aiInput) },
                     onVoiceToggle = {
                         if (uiState.voiceStatus is VoiceStatus.Processing) {
                             Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
-                        } else if (isRecording) {
-                            stopCloudRecording()
                         } else {
-                            // Prefer in-app cloud recording to avoid system dialog popup
-                            if (viewModel.isCloudVoiceConfigured()) {
-                                startCloudRecordingWithPermissionGuard()
-                            } else if (voiceInputMode == VoiceInputMode.SYSTEM) {
-                                try {
-                                    speechIntentLauncher.launch(viewModel.buildSystemVoiceRecognitionIntent())
-                                } catch (_: ActivityNotFoundException) {
-                                    Toast.makeText(context, "系统语音不可用", Toast.LENGTH_SHORT).show()
-                                }
-                            } else {
-                                Toast.makeText(context, "请到设置页配置 Azure 语音 Deployment", Toast.LENGTH_LONG).show()
-                            }
+                            startVoiceWithPermissionGuard()
                         }
                     }
                 )
@@ -829,7 +761,6 @@ private fun AiActionButton(
     isRecording: Boolean,
     aiStatus: AiStatus,
     voiceStatus: VoiceStatus,
-    voiceInputMode: VoiceInputMode,
     onSubmit: () -> Unit,
     onVoiceToggle: () -> Unit
 ) {

@@ -384,25 +384,6 @@ private fun AiInputSection(
         }
     }
 
-    when {
-        isRecording -> {
-            Text(
-                text = "🎙 正在录音，再点一次按钮结束",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-        voiceStatus is VoiceStatus.Processing -> {
-            Text(
-                text = "⏳ 正在识别语音...",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-    }
-
     AiActionButton(
         aiInput = inputText,
         isRecording = isRecording,
