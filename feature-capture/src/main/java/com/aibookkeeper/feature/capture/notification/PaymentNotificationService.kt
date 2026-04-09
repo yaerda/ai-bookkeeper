@@ -10,11 +10,8 @@ import android.content.Intent
 import android.os.IBinder
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
-import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.feature.capture.R
-import com.aibookkeeper.feature.capture.screenshot.ScreenshotCaptureActivity
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 
 /**
  * Foreground service that maintains a persistent notification in the status bar
@@ -25,9 +22,6 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class PaymentNotificationService : Service() {
-
-    @Inject
-    lateinit var secureConfigStore: SecureConfigStore
 
     companion object {
         fun start(context: Context) {
@@ -129,31 +123,30 @@ class PaymentNotificationService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
+        // Compact view: title + subtitle (tap to open app)
+        val compactView = RemoteViews(packageName, R.layout.notification_compact)
+
+        // Expanded view: quick-action buttons (text, voice, camera) + category shortcuts
+        val expandedView = RemoteViews(packageName, R.layout.notification_quick_actions)
+        expandedView.setOnClickPendingIntent(R.id.btn_text_input, openAppPending)
+        expandedView.setOnClickPendingIntent(
+            R.id.btn_voice_input,
+            buildQuickInputPending(NotificationConstants.ACTION_QUICK_VOICE)
+        )
+        expandedView.setOnClickPendingIntent(
+            R.id.btn_camera_input,
+            buildQuickInputPending(NotificationConstants.ACTION_QUICK_CAMERA)
+        )
+
+        return NotificationCompat.Builder(this, NotificationConstants.CHANNEL_ID_QUICK_INPUT)
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppPending)
-
-        if (secureConfigStore.isScreenshotCaptureEnabled()) {
-            // Compact view: title + subtitle + screenshot button in one row (always visible)
-            val compactView = RemoteViews(packageName, R.layout.notification_compact)
-            compactView.setOnClickPendingIntent(R.id.btn_screenshot, buildScreenshotCapturePending())
-
-            // Expanded view: full quick-action buttons
-            val expandedView = RemoteViews(packageName, R.layout.notification_quick_actions)
-            expandedView.setOnClickPendingIntent(R.id.btn_camera_input, buildScreenshotCapturePending())
-            expandedView.setOnClickPendingIntent(R.id.btn_text_input, openAppPending)
-
-            builder.setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomContentView(compactView)
-                .setCustomBigContentView(expandedView)
-        } else {
-            builder.setContentTitle("AI 智能记账")
-                .setContentText("点击打开记账")
-        }
-
-        return builder.build()
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(compactView)
+            .setCustomBigContentView(expandedView)
+            .build()
     }
 
     private fun buildQuickInputPending(action: String): PendingIntent {
@@ -163,19 +156,6 @@ class PaymentNotificationService : Service() {
         }
         return PendingIntent.getActivity(
             this, action.hashCode(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun buildScreenshotCapturePending(): PendingIntent {
-        val intent = Intent(this, ScreenshotCaptureActivity::class.java).apply {
-            action = NotificationConstants.ACTION_SCREENSHOT_CAPTURE
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        return PendingIntent.getActivity(
-            this,
-            NotificationConstants.REQUEST_CODE_SCREENSHOT,
-            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

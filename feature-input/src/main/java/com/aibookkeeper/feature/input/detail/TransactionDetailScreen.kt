@@ -64,6 +64,8 @@ import com.aibookkeeper.core.common.extensions.toFriendlyDateTimeString
 import com.aibookkeeper.core.common.extensions.toFriendlyFullDateTimeString
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
+import com.aibookkeeper.feature.input.common.AddCategoryDialog
+import com.aibookkeeper.feature.input.common.resolveCategoryIcon
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
@@ -155,6 +157,7 @@ fun TransactionDetailScreen(
                     onUpdate = { amount, catId, catName, note, date ->
                         viewModel.updateTransaction(amount, catId, catName, note, date)
                     },
+                    onAddCategory = viewModel::addCategory,
                     modifier = Modifier.padding(innerPadding)
                 )
             }
@@ -169,10 +172,15 @@ private fun TransactionDetailContent(
     categories: List<com.aibookkeeper.core.data.model.Category>,
     onDelete: () -> Unit,
     onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime) -> Unit,
+    onAddCategory: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var isEditing by remember { mutableStateOf(false) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
+    var newCategoryPresetIcon by remember { mutableStateOf(CategoryIconMapper.DEFAULT_ICON_KEY) }
+    var newCategoryCustomEmoji by remember { mutableStateOf("") }
     var editAmount by remember(transaction.id) { mutableStateOf("%.2f".format(transaction.amount)) }
     var editNote by remember(transaction.id) { mutableStateOf(transaction.note ?: "") }
     var editCategoryId by remember(transaction.id) { mutableStateOf(transaction.categoryId) }
@@ -364,6 +372,32 @@ private fun TransactionDetailContent(
                                 )
                             }
                         }
+                        // Add new category chip
+                        FilterChip(
+                            selected = false,
+                            onClick = { showAddCategoryDialog = true },
+                            label = { Text("＋ 新增") }
+                        )
+                    }
+
+                    if (showAddCategoryDialog) {
+                        AddCategoryDialog(
+                            name = newCategoryName,
+                            presetIcon = newCategoryPresetIcon,
+                            customEmoji = newCategoryCustomEmoji,
+                            onNameChange = { newCategoryName = it },
+                            onPresetIconSelected = { newCategoryPresetIcon = it; newCategoryCustomEmoji = "" },
+                            onCustomEmojiChange = { newCategoryCustomEmoji = it },
+                            onDismiss = { showAddCategoryDialog = false },
+                            onConfirm = {
+                                val icon = resolveCategoryIcon(newCategoryPresetIcon, newCategoryCustomEmoji)
+                                onAddCategory(newCategoryName, icon)
+                                showAddCategoryDialog = false
+                                newCategoryName = ""
+                                newCategoryPresetIcon = CategoryIconMapper.DEFAULT_ICON_KEY
+                                newCategoryCustomEmoji = ""
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))

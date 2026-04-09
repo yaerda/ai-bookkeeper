@@ -98,7 +98,8 @@ import android.util.Base64
 fun CaptureScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
-    autoAction: String? = null
+    autoAction: String? = null,
+    initialImageUri: String? = null
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
@@ -182,7 +183,7 @@ fun CaptureScreen(
     fun scheduleUpdateFromText(text: String) {
         debounceJob?.cancel()
         debounceJob = coroutineScope.launch {
-            kotlinx.coroutines.delay(2000)
+            kotlinx.coroutines.delay(1000)
             updateResultsFromText(text)
         }
     }
@@ -310,6 +311,13 @@ fun CaptureScreen(
             "camera" -> doLaunchCamera()
             "gallery" -> galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             "file" -> fileLauncher.launch("image/*")
+        }
+    }
+
+    // Load shared image when opened from share sheet
+    LaunchedEffect(initialImageUri) {
+        if (initialImageUri != null) {
+            onImageSelected(Uri.parse(initialImageUri))
         }
     }
 
@@ -466,46 +474,8 @@ fun CaptureScreen(
         }
     }
 
-    val doSaveTransaction: suspend (ExtractionResult) -> Long = { data ->
-        val type = try {
-            com.aibookkeeper.core.data.model.TransactionType.valueOf(data.type)
-        } catch (_: Exception) {
-            com.aibookkeeper.core.data.model.TransactionType.EXPENSE
-        }
-        val categoryId = categoryDao.findByNameAndType(data.category, type.name)?.id
-            ?: categoryDao.findByNameAndType("其他", type.name)?.id
-        val now = java.time.LocalDateTime.now()
-        val parsedDate = try {
-            java.time.LocalDate.parse(data.date).atStartOfDay()
-        } catch (_: Exception) {
-            now
-        }
-        val amount = Math.abs(data.amount ?: 0.0) // Always store positive, type indicates direction
-
-        if (amount == 0.0) {
-            -1L
-        } else {
-            transactionRepository.create(
-                com.aibookkeeper.core.data.model.Transaction(
-                    amount = amount,
-                    type = type,
-                    categoryId = categoryId,
-                    merchantName = data.merchantName,
-                    note = data.note,
-                    originalInput = ocrText.ifBlank { "AI Vision: image" },
-                    date = parsedDate,
-                    createdAt = now,
-                    updatedAt = now,
-                    source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
-                    status = if (data.confidence >= 0.7f)
-                        com.aibookkeeper.core.data.model.TransactionStatus.CONFIRMED
-                    else
-                        com.aibookkeeper.core.data.model.TransactionStatus.PENDING,
-                    syncStatus = com.aibookkeeper.core.data.model.SyncStatus.LOCAL,
-                    aiConfidence = data.confidence
-                )
-            ).getOrElse { -1L }
-        }
+    val transactionSaver = remember(transactionRepository, categoryDao) {
+        TransactionSaver(transactionRepository, categoryDao)
     }
 
     fun confirmAndSave(data: ExtractionResult) {
@@ -514,7 +484,7 @@ fun CaptureScreen(
 
         coroutineScope.launch {
             val txId: Long = try {
-                withContext(Dispatchers.IO) { doSaveTransaction(data) }
+                withContext(Dispatchers.IO) { transactionSaver.saveOne(data, ocrText) }
             } catch (_: Exception) { -1L }
 
             isProcessing = false
@@ -532,20 +502,12 @@ fun CaptureScreen(
         processingLabel = "正在保存 ${items.size} 笔..."
 
         coroutineScope.launch {
-            var successCount = 0
-            var totalAmount = 0.0
-            for (item in items) {
-                android.util.Log.d("CaptureScreen", "Saving item: amount=${item.amount}, type=${item.type}, category=${item.category}, note=${item.note}")
-                val txId: Long = try {
-                    withContext(Dispatchers.IO) { doSaveTransaction(item) }
-                } catch (e: Exception) {
-                    android.util.Log.e("CaptureScreen", "Save failed for item: ${item.note}", e)
-                    -1L
-                }
-                if (txId > 0) {
-                    successCount++
-                    totalAmount += (item.amount ?: 0.0)
-                }
+            val sharedDate = extractionResult?.date?.takeIf { it.isNotBlank() }
+            val (successCount, totalAmount) = try {
+                withContext(Dispatchers.IO) { transactionSaver.saveAll(items, ocrText, sharedDate) }
+            } catch (e: Exception) {
+                android.util.Log.e("CaptureScreen", "Batch save failed", e)
+                Pair(0, 0.0)
             }
             isProcessing = false
             if (successCount > 0) {

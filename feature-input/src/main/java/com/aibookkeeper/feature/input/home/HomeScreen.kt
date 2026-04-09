@@ -25,6 +25,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,9 +73,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +98,7 @@ import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -370,9 +376,9 @@ fun HomeScreen(
         // Auto-start voice recording if opened via long-press
         if (startWithVoice) {
             LaunchedEffect(Unit) {
-                startWithVoice = false
-                kotlinx.coroutines.delay(600)
+                kotlinx.coroutines.delay(300)
                 startVoiceWithPermissionGuard()
+                startWithVoice = false
             }
         }
 
@@ -527,7 +533,7 @@ fun HomeScreen(
                         )
                         // Auto close after success
                         LaunchedEffect(status) {
-                            kotlinx.coroutines.delay(1500)
+                            kotlinx.coroutines.delay(500)
                             aiInput = ""
                             viewModel.resetAiStatus()
                             showAiSheet = false
@@ -771,6 +777,14 @@ private fun AiActionButton(
     onVoiceToggle: () -> Unit
 ) {
     val isProcessing = aiStatus is AiStatus.Processing || voiceStatus is VoiceStatus.Processing
+
+    // Keep references fresh for use inside pointerInput coroutine
+    val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
+    val currentOnSubmit by rememberUpdatedState(onSubmit)
+    val currentIsRecording by rememberUpdatedState(isRecording)
+    val currentIsProcessing by rememberUpdatedState(isProcessing)
+    val currentAiInput by rememberUpdatedState(aiInput)
+
     val buttonColor by animateColorAsState(
         targetValue = when {
             isRecording -> MaterialTheme.colorScheme.error
@@ -799,18 +813,29 @@ private fun AiActionButton(
             .background(
                 if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
             )
-            .combinedClickable(
-                onClick = {
-                    when {
-                        isRecording -> onVoiceToggle() // stop recording
-                        aiInput.isNotBlank() && !isProcessing -> onSubmit()
-                        else -> {} // no-op when empty and not recording
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val upBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        waitForUpOrCancellation()
                     }
-                },
-                onLongClick = {
-                    if (!isProcessing) onVoiceToggle()
+                    if (upBeforeLongPress != null) {
+                        // Short tap
+                        when {
+                            currentIsRecording -> currentOnVoiceToggle()
+                            currentAiInput.isNotBlank() && !currentIsProcessing -> currentOnSubmit()
+                            else -> {}
+                        }
+                    } else {
+                        // Long press reached — start recording
+                        if (!currentIsProcessing) currentOnVoiceToggle()
+                        // Wait for finger release
+                        waitForUpOrCancellation()
+                        // Release — stop recording
+                        if (currentIsRecording) currentOnVoiceToggle()
+                    }
                 }
-            )
+            }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {

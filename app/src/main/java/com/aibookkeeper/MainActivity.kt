@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
 import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
+import com.aibookkeeper.feature.capture.screenshot.ShareImageReceiverActivity
 import com.aibookkeeper.navigation.AppNavHost
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -25,6 +26,8 @@ class MainActivity : ComponentActivity() {
         splashScreen.setKeepOnScreenCondition { !isComposeReady }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val sharedImageUri = intent?.getStringExtra(ShareImageReceiverActivity.EXTRA_SHARED_IMAGE_URI)
+
         setContent {
             // Signal that Compose is ready after first frame
             LaunchedEffect(Unit) { isComposeReady = true }
@@ -33,7 +36,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavHost()
+                    AppNavHost(sharedImageUri = sharedImageUri)
                 }
             }
         }

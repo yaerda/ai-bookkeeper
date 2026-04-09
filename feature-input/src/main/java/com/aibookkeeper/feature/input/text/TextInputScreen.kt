@@ -22,6 +22,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,9 +76,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -94,10 +99,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
+import com.aibookkeeper.feature.input.common.AddCategoryDialog
+import com.aibookkeeper.feature.input.common.CategoryIconEditor
+import com.aibookkeeper.feature.input.common.CategoryNameAndEmojiFields
+import com.aibookkeeper.feature.input.common.resolveCategoryIcon
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.home.VoiceInputMode
 import com.aibookkeeper.feature.input.home.VoiceStatus
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -662,48 +672,6 @@ private fun ManualInputForm(
 }
 
 @Composable
-private fun AddCategoryDialog(
-    name: String,
-    presetIcon: String,
-    customEmoji: String,
-    onNameChange: (String) -> Unit,
-    onPresetIconSelected: (String) -> Unit,
-    onCustomEmojiChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("添加新分类") },
-        text = {
-            Column {
-                CategoryNameAndEmojiFields(
-                    name = name,
-                    onNameChange = onNameChange,
-                    customEmoji = customEmoji,
-                    onCustomEmojiChange = onCustomEmojiChange
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                CategoryIconEditor(
-                    presetIcon = presetIcon,
-                    customEmoji = customEmoji,
-                    onPresetIconSelected = onPresetIconSelected
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = name.isNotBlank()
-            ) { Text("添加") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
-}
-
-@Composable
 private fun ExtractingSection() {
     Column(
         modifier = Modifier
@@ -1029,93 +997,6 @@ private fun EditCategoryDialog(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun CategoryIconEditor(
-    presetIcon: String,
-    customEmoji: String,
-    onPresetIconSelected: (String) -> Unit
-) {
-    val selectedIcon = resolveCategoryIcon(presetIcon, customEmoji)
-
-    Text("选择图标", style = MaterialTheme.typography.labelLarge)
-    Spacer(modifier = Modifier.height(8.dp))
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = CategoryIconMapper.getEmoji(selectedIcon), fontSize = 20.sp)
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "也可以在上面的 Emoji 框直接输入自定义图标",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-    Spacer(modifier = Modifier.height(8.dp))
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        CategoryIconMapper.allIcons.forEach { (iconKey, emoji) ->
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (customEmoji.isBlank() && presetIcon == iconKey)
-                            MaterialTheme.colorScheme.primaryContainer
-                        else Color.Transparent
-                    )
-                    .clickable { onPresetIconSelected(iconKey) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = emoji, fontSize = 20.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryNameAndEmojiFields(
-    name: String,
-    onNameChange: (String) -> Unit,
-    customEmoji: String,
-    onCustomEmojiChange: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = customEmoji,
-            onValueChange = onCustomEmojiChange,
-            label = { Text("Emoji") },
-            placeholder = { Text("🥬") },
-            singleLine = true,
-            modifier = Modifier.width(92.dp)
-        )
-        OutlinedTextField(
-            value = name,
-            onValueChange = onNameChange,
-            label = { Text("分类名称") },
-            singleLine = true,
-            modifier = Modifier.weight(1f)
-        )
-    }
-}
-
-private fun resolveCategoryIcon(presetIcon: String, customEmoji: String): String =
-    customEmoji.trim().ifBlank { presetIcon }
-
 private fun Context.hasAudioPermission(): Boolean {
     return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
@@ -1132,6 +1013,14 @@ private fun AiActionButton(
     onVoiceToggle: () -> Unit
 ) {
     val isProcessing = isSubmitting || voiceStatus is VoiceStatus.Processing
+
+    // Keep references fresh for use inside pointerInput coroutine
+    val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
+    val currentOnSubmit by rememberUpdatedState(onSubmit)
+    val currentIsRecording by rememberUpdatedState(isRecording)
+    val currentIsProcessing by rememberUpdatedState(isProcessing)
+    val currentAiInput by rememberUpdatedState(aiInput)
+
     val buttonColor by animateColorAsState(
         targetValue = when {
             isRecording -> MaterialTheme.colorScheme.error
@@ -1159,18 +1048,29 @@ private fun AiActionButton(
             .background(
                 if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
             )
-            .combinedClickable(
-                onClick = {
-                    when {
-                        isRecording -> onVoiceToggle()
-                        aiInput.isNotBlank() && !isProcessing -> onSubmit()
-                        else -> {}
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val upBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        waitForUpOrCancellation()
                     }
-                },
-                onLongClick = {
-                    if (!isProcessing) onVoiceToggle()
+                    if (upBeforeLongPress != null) {
+                        // Short tap
+                        when {
+                            currentIsRecording -> currentOnVoiceToggle()
+                            currentAiInput.isNotBlank() && !currentIsProcessing -> currentOnSubmit()
+                            else -> {}
+                        }
+                    } else {
+                        // Long press reached — start recording
+                        if (!currentIsProcessing) currentOnVoiceToggle()
+                        // Wait for finger release
+                        waitForUpOrCancellation()
+                        // Release — stop recording
+                        if (currentIsRecording) currentOnVoiceToggle()
+                    }
                 }
-            )
+            }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {

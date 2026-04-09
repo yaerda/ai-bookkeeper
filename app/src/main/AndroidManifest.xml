@@ -12,8 +12,6 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
-        tools:targetApi="34" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
         tools:targetApi="34" />
 
@@ -51,6 +49,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/share_shortcuts" />
         </activity>
 
         <!-- Transparent Activity for quick input from notification -->
@@ -79,12 +80,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Receive shared images (system screenshot share sheet, etc.) -->
         <activity
-            android:name="com.aibookkeeper.feature.capture.screenshot.ScreenshotCaptureActivity"
-            android:exported="false"
+            android:name="com.aibookkeeper.feature.capture.screenshot.ShareImageReceiverActivity"
+            android:exported="true"
             android:theme="@style/Theme.AiBookkeeper.Transparent"
             android:excludeFromRecents="true"
-            android:launchMode="singleTask" />
+            android:launchMode="singleTask"
+            android:label="AI 截图记账">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
 
         <!-- Undo transaction from success-feedback notification -->
         <receiver
@@ -94,12 +103,6 @@
                 <action android:name="com.aibookkeeper.action.UNDO_TRANSACTION" />
             </intent-filter>
         </receiver>
-
-        <!-- Screenshot capture foreground service (Android 14+ media projection) -->
-        <service
-            android:name="com.aibookkeeper.feature.capture.screenshot.ScreenshotForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
 
         <!-- Persistent notification foreground service -->
         <service

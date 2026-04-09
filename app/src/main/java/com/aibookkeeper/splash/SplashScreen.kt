@@ -31,7 +31,7 @@ fun SplashScreen(
     } catch (_: Exception) { "" }
 
     LaunchedEffect(Unit) {
-        delay(2000)
+        delay(1000)
         onSplashFinished()
     }
 

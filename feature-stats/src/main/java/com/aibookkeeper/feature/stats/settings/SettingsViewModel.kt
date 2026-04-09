@@ -44,7 +44,6 @@ class SettingsViewModel @Inject constructor(
                 isNotificationEnabled = NotificationPermissionHelper.isNotificationEnabled(context),
                 isAccessibilityMonitoringEnabled =
                     secureConfigStore.isAccessibilityMonitoringEnabled(),
-                isScreenshotCaptureEnabled = secureConfigStore.isScreenshotCaptureEnabled(),
                 isAccessibilityServiceActive = isAccessibilityServiceActive,
                 azureEndpoint = secureConfigStore.getEndpoint(),
                 azureApiKey = secureConfigStore.getApiKey(),
@@ -86,11 +85,6 @@ class SettingsViewModel @Inject constructor(
         secureConfigStore.setAccessibilityMonitoringEnabled(enabled)
         _uiState.update { it.copy(isAccessibilityMonitoringEnabled = enabled) }
         refreshAccessibilityStatus()
-    }
-
-    fun setScreenshotCaptureEnabled(enabled: Boolean) {
-        secureConfigStore.setScreenshotCaptureEnabled(enabled)
-        _uiState.update { it.copy(isScreenshotCaptureEnabled = enabled) }
     }
 
     fun openAccessibilitySettings(context: Context) {
@@ -174,7 +168,6 @@ data class SettingsUiState(
     val isPermissionGranted: Boolean = false,
     val isNotificationEnabled: Boolean = false,
     val isAccessibilityMonitoringEnabled: Boolean = false,
-    val isScreenshotCaptureEnabled: Boolean = true,
     val isAccessibilityServiceActive: Boolean = false,
     val azureEndpoint: String = "",
     val azureApiKey: String = "",

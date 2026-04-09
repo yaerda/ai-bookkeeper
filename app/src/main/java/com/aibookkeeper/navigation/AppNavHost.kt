@@ -29,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
+import com.aibookkeeper.feature.capture.navigation.CaptureRoutes
 import com.aibookkeeper.feature.input.navigation.InputRoutes
 import com.aibookkeeper.feature.input.navigation.inputNavGraph
 import com.aibookkeeper.feature.capture.navigation.captureNavGraph
@@ -60,7 +61,7 @@ sealed class BottomNavItem(
 }
 
 @Composable
-fun AppNavHost() {
+fun AppNavHost(sharedImageUri: String? = null) {
     val navController = rememberNavController()
     val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -138,6 +139,12 @@ fun AppNavHost() {
                     onSplashFinished = {
                         navController.navigate(actualDestination) {
                             popUpTo(ROUTE_SPLASH) { inclusive = true }
+                        }
+                        // Open CaptureScreen with shared image if launched via share
+                        if (sharedImageUri != null) {
+                            navController.navigate(
+                                CaptureRoutes.CAMERA + "?imageUri=${android.net.Uri.encode(sharedImageUri)}"
+                            )
                         }
                     }
                 )

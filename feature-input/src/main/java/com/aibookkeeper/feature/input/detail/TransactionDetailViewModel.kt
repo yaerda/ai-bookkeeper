@@ -3,7 +3,10 @@ package com.aibookkeeper.feature.input.detail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aibookkeeper.core.common.util.CategoryIconMapper
+import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.Transaction
+import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +58,20 @@ class TransactionDetailViewModel @Inject constructor(
                     note = note,
                     date = date,
                     updatedAt = java.time.LocalDateTime.now()
+                )
+            )
+        }
+    }
+
+    fun addCategory(name: String, icon: String = CategoryIconMapper.DEFAULT_ICON_KEY) {
+        viewModelScope.launch {
+            categoryRepository.create(
+                Category(
+                    name = name.trim(),
+                    icon = icon.trim().ifBlank { CategoryIconMapper.DEFAULT_ICON_KEY },
+                    color = "#607D8B",
+                    type = TransactionType.EXPENSE,
+                    isSystem = false
                 )
             )
         }

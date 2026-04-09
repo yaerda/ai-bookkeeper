@@ -17,7 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
@@ -154,22 +153,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
-
-            SettingsToggleRow(
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.CameraAlt,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                },
-                title = "截图记账",
-                subtitle = "在通知栏显示截图按钮，付款后一键截图识别记账",
-                checked = uiState.isScreenshotCaptureEnabled,
-                onCheckedChange = viewModel::setScreenshotCaptureEnabled
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
             SettingsToggleRow(
                 icon = {
