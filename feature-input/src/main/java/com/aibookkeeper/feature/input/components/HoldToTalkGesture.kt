@@ -24,11 +24,13 @@ internal fun Modifier.holdToTalkGesture(
     isProcessing: Boolean,
     hasSubmitContent: Boolean,
     onVoiceToggle: () -> Unit,
+    onHoldReleased: () -> Unit = {},
     onSubmit: () -> Unit
 ): Modifier {
     val scope = rememberCoroutineScope()
     var stopRecordingJob by remember { mutableStateOf<Job?>(null) }
     val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
+    val currentOnHoldReleased by rememberUpdatedState(onHoldReleased)
     val currentOnSubmit by rememberUpdatedState(onSubmit)
     val currentIsRecording by rememberUpdatedState(isRecording)
     val currentIsProcessing by rememberUpdatedState(isProcessing)
@@ -39,6 +41,7 @@ internal fun Modifier.holdToTalkGesture(
         stopRecordingJob = scope.launch {
             delay(RELEASE_GRACE_MILLIS)
             if (currentIsRecording) currentOnVoiceToggle()
+            currentOnHoldReleased()
         }
     }
 
@@ -48,7 +51,8 @@ internal fun Modifier.holdToTalkGesture(
 
     return pointerInput(Unit) {
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
+            val down = awaitFirstDown(requireUnconsumed = false)
+            down.consume()
             stopRecordingJob?.cancel()
             stopRecordingJob = null
 
@@ -57,6 +61,7 @@ internal fun Modifier.holdToTalkGesture(
                     waitForUpOrCancellation()
                 }
             if (upBeforeLongPress != null) {
+                upBeforeLongPress.consume()
                 when {
                     currentIsRecording -> scheduleStop()
                     currentHasSubmitContent && !currentIsProcessing -> currentOnSubmit()
@@ -65,7 +70,7 @@ internal fun Modifier.holdToTalkGesture(
                 if (!currentIsProcessing && !currentIsRecording) {
                     currentOnVoiceToggle()
                 }
-                waitForUpOrCancellation()
+                waitForUpOrCancellation()?.consume()
                 scheduleStop()
             }
         }

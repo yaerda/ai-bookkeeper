@@ -24,7 +24,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +71,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -114,6 +114,9 @@ fun HomeScreen(
     var aiInput by remember { mutableStateOf("") }
     var showPromptReview by remember { mutableStateOf(false) }
     var startWithVoice by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var stopVoiceRequest by remember { mutableIntStateOf(0) }
+    var voiceStartedFromFab by remember { mutableStateOf(false) }
     var showLedgerMenu by remember { mutableStateOf(false) }
 
     // Auto-open AI sheet when returning from CaptureScreen
@@ -227,12 +230,24 @@ fun HomeScreen(
                         .size(56.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .combinedClickable(
-                            onClick = {
-                                showAiSheet = true
+                        .holdToTalkGesture(
+                            isRecording = isRecording,
+                            isProcessing = false,
+                            hasSubmitContent = true,
+                            onVoiceToggle = {
+                                if (isRecording) {
+                                    stopVoiceRequest++
+                                } else {
+                                    voiceStartedFromFab = true
+                                    startWithVoice = true
+                                    showAiSheet = true
+                                }
                             },
-                            onLongClick = {
-                                startWithVoice = true
+                            onHoldReleased = {
+                                voiceStartedFromFab = false
+                            },
+                            onSubmit = {
+                                voiceStartedFromFab = false
                                 showAiSheet = true
                             }
                         ),
@@ -324,7 +339,6 @@ fun HomeScreen(
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var pendingVoiceRequest by remember { mutableStateOf(false) }
-        var isRecording by remember { mutableStateOf(false) }
         var isImageOcrProcessing by remember { mutableStateOf(false) }
 
         // Local SpeechRecognizer (no system UI)
@@ -334,7 +348,12 @@ fun HomeScreen(
 
         DisposableEffect(Unit) {
             onDispose {
+                speechRecognizer.cancel()
                 speechRecognizer.destroy()
+                isRecording = false
+                pendingVoiceRequest = false
+                startWithVoice = false
+                voiceStartedFromFab = false
             }
         }
 
@@ -357,6 +376,7 @@ fun HomeScreen(
                         SpeechRecognizer.ERROR_AUDIO -> "录音错误"
                         SpeechRecognizer.ERROR_NETWORK -> "网络不可用，请检查连接"
                         SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "语音识别器正忙，请重试"
                         else -> "语音识别失败 (错误码: $error)"
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -365,7 +385,9 @@ fun HomeScreen(
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() { isRecording = false }
+                override fun onEndOfSpeech() {
+                    isRecording = false
+                }
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
             true
@@ -377,14 +399,28 @@ fun HomeScreen(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1_500L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
             }
-            isRecording = true
-            speechRecognizer.startListening(intent)
+            try {
+                isRecording = true
+                speechRecognizer.startListening(intent)
+            } catch (error: IllegalStateException) {
+                isRecording = false
+                voiceStartedFromFab = false
+                Toast.makeText(context, error.message ?: "语音识别暂时不可用，请重试", Toast.LENGTH_SHORT).show()
+            } catch (_: SecurityException) {
+                isRecording = false
+                voiceStartedFromFab = false
+                Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
+            }
         }
 
         fun stopLocalSpeechRecognition() {
             speechRecognizer.stopListening()
             isRecording = false
+            voiceStartedFromFab = false
         }
         val photoPickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.PickVisualMedia()
@@ -417,6 +453,7 @@ fun HomeScreen(
                 startLocalSpeechRecognition()
             } else {
                 pendingVoiceRequest = false
+                voiceStartedFromFab = false
                 Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
             }
         }
@@ -443,8 +480,21 @@ fun HomeScreen(
             }
         }
 
+        LaunchedEffect(stopVoiceRequest) {
+            if (stopVoiceRequest > 0 && isRecording) {
+                stopLocalSpeechRecognition()
+            }
+        }
+
         ModalBottomSheet(
             onDismissRequest = {
+                if (voiceStartedFromFab) {
+                    return@ModalBottomSheet
+                }
+                speechRecognizer.cancel()
+                isRecording = false
+                pendingVoiceRequest = false
+                startWithVoice = false
                 showPromptReview = false
                 showAiSheet = false
             },
