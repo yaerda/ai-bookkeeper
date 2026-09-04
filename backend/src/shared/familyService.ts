@@ -6,6 +6,12 @@ import { resolveUser } from "./users.js";
 export type MemberRole = "VIEWER" | "EDITOR";
 export type LedgerMode = "PERSONAL" | "FAMILY";
 
+export class DefaultLedgerDeletionError extends Error {
+  constructor() {
+    super("The default ledger cannot be deleted");
+  }
+}
+
 interface LedgerRow {
   id: string;
   name: string;
@@ -63,11 +69,12 @@ async function resolveOwnedLedger(
     `select id, owner_id, name, mode, is_default
        from family_ledger
       where owner_id = $1
-        and id = coalesce($2::uuid, (
-          select id
-            from family_ledger
-           where owner_id = $1 and is_default
-        ))`,
+         and deleted_at is null
+         and id = coalesce($2::uuid, (
+           select id
+             from family_ledger
+            where owner_id = $1 and is_default and deleted_at is null
+         ))`,
     [ownerId, requestedLedgerId ?? null]
   );
   if (!result.rows[0]) {
@@ -88,14 +95,14 @@ export async function listLedgers(
             'OWNER'::text as role, fl.mode, fl.is_default
        from family_ledger fl
        join app_user owner on owner.id = fl.owner_id
-      where fl.owner_id = $1
+       where fl.owner_id = $1 and fl.deleted_at is null
       union all
      select fl.id, fl.name, owner.normalized_email as owner_email,
             lm.role, fl.mode, false as is_default
        from ledger_member lm
        join family_ledger fl on fl.id = lm.ledger_id
        join app_user owner on owner.id = fl.owner_id
-      where lm.member_id = $1
+      where lm.member_id = $1 and fl.deleted_at is null
       order by is_default desc, name, owner_email`,
     [userId]
   );
@@ -105,7 +112,7 @@ export async function listLedgers(
        from ledger_invitation li
        join family_ledger fl on fl.id = li.ledger_id
        join app_user owner on owner.id = fl.owner_id
-      where li.invited_email = $1
+      where li.invited_email = $1 and fl.deleted_at is null
       order by li.created_at`,
     [identity.email]
   );
@@ -291,6 +298,54 @@ export async function acceptInvitation(
     invitationId
   ]);
   return { ledgerId: row.ledger_id, role: row.role };
+}
+
+export async function deleteOrLeaveLedger(
+  client: PoolClient,
+  identity: AuthenticatedUser,
+  ledgerId: string
+): Promise<{ action: "DELETED" | "LEFT" } | undefined> {
+  const userId = await resolveUser(client, identity);
+  const access = await client.query<{
+    owner_id: string;
+    is_default: boolean;
+    member_id: string | null;
+  }>(
+    `select fl.owner_id, fl.is_default, lm.member_id
+       from family_ledger fl
+       left join ledger_member lm
+         on lm.ledger_id = fl.id and lm.member_id = $2
+      where fl.id = $1
+        and fl.deleted_at is null
+        and (fl.owner_id = $2 or lm.member_id is not null)
+      for update of fl`,
+    [ledgerId, userId]
+  );
+  const row = access.rows[0];
+  if (!row) return undefined;
+
+  if (row.owner_id === userId) {
+    if (row.is_default) throw new DefaultLedgerDeletionError();
+    await client.query(
+      `update family_ledger
+          set deleted_at = now(), updated_at = now()
+        where id = $1 and deleted_at is null`,
+      [ledgerId]
+    );
+    await client.query("delete from ledger_invitation where ledger_id = $1", [
+      ledgerId
+    ]);
+    await client.query("delete from ledger_member where ledger_id = $1", [
+      ledgerId
+    ]);
+    return { action: "DELETED" };
+  }
+
+  await client.query(
+    "delete from ledger_member where ledger_id = $1 and member_id = $2",
+    [ledgerId, userId]
+  );
+  return { action: "LEFT" };
 }
 
 export async function updateMember(

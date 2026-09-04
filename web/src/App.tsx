@@ -674,6 +674,7 @@ function FamilyPanel({
   onRemove,
   onAccept,
   onSettings,
+  onDelete,
 }: {
   ledger: FamilyLedger | null
   members: FamilyMember[]
@@ -685,11 +686,13 @@ function FamilyPanel({
   onRemove: (id: string) => Promise<void>
   onAccept: (id: string) => Promise<void>
   onSettings: (mode: FamilyLedger['mode'], name?: string) => Promise<void>
+  onDelete: () => Promise<void>
 }) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Exclude<LedgerRole, 'OWNER'>>('EDITOR')
   const [ledgerName, setLedgerName] = useState(ledger?.name ?? '')
   const [confirmPersonal, setConfirmPersonal] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const owner = canManageMembers(ledger?.role)
 
   return (
@@ -719,6 +722,27 @@ function FamilyPanel({
         </section>}
         {ledger && owner && <section className="drawer-section invite-form"><h3>邀请成员</h3>{ledger.mode === 'PERSONAL' && <p className="conversion-note">发送首个邀请会自动将此账本转换为家庭模式。</p>}<label>邮箱<input type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>权限<select value={role} onChange={(e) => setRole(e.target.value as 'EDITOR' | 'VIEWER')}><option value="EDITOR">可编辑</option><option value="VIEWER">仅查看</option></select></label><button className="primary wide" disabled={!email || loading} onClick={() => void onInvite(email, role).then(() => setEmail(''))}>发送邀请</button></section>}
         {ledger && !owner && <p className="permission-note">只有账本所有者可以邀请或管理成员。</p>}
+        {ledger && <section className="drawer-section ledger-danger-zone">
+          <div className="mode-heading">
+            <div>
+              <h3>{owner ? '删除自己的账本' : '退出受邀账本'}</h3>
+              <p>{owner
+                ? ledger.isDefault
+                  ? '默认账本承载本地离线数据，不能删除。'
+                  : '账本及其交易将从应用中永久删除，所有成员和邀请会立即失效。'
+                : '你将失去此账本的查看和编辑权限；如需再次加入，必须由 owner 重新邀请。'}</p>
+            </div>
+            <span className={`mode-badge ${owner ? 'personal' : 'family'}`}>{owner ? '我的账本' : '受邀账本'}</span>
+          </div>
+          {!ledger.isDefault && <button className="danger-button wide" disabled={loading} onClick={() => setConfirmDelete(true)}>{owner ? '永久删除账本' : '退出此账本'}</button>}
+          {confirmDelete && <div className="destructive-confirm" role="alertdialog" aria-labelledby="delete-ledger-confirm-title">
+            <strong id="delete-ledger-confirm-title">{owner ? `再次确认永久删除“${ledger.name}”` : `再次确认退出“${ledger.name}”`}</strong>
+            <p>{owner
+              ? '此操作在应用中不可恢复。账本会被标记为已删除，所有共享权限都会撤销。'
+              : '退出后不会删除 owner 的账本或交易，但你的访问权限会被移除，恢复访问需要重新邀请。'}</p>
+            <div><button className="secondary" onClick={() => setConfirmDelete(false)}>取消</button><button className="danger-button" disabled={loading} onClick={() => void onDelete()}>{loading ? '处理中…' : owner ? '确认永久删除' : '确认退出'}</button></div>
+          </div>}
+        </section>}
       </aside>
     </div>
   )
@@ -959,6 +983,21 @@ function Dashboard({
     }
   }
 
+  async function deleteCurrentLedger() {
+    if (!ledgerId) return
+    setSaving(true)
+    setError('')
+    try {
+      await api.deleteLedger(ledgerId)
+      await loadFamily()
+      setFamilyOpen(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '账本删除失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1075,6 +1114,7 @@ function Dashboard({
           await api.inviteMember(email, role, ledgerId)
         }, 'ledgers')}
         onSettings={(mode, name) => runFamilyAction(() => api.updateLedgerSettings(mode, name, ledgerId), 'ledgers')}
+        onDelete={deleteCurrentLedger}
         onRole={(id, role) => runFamilyAction(() => api.updateMember(id, role, ledgerId))}
         onRemove={(id) => runFamilyAction(() => api.removeMember(id, ledgerId))}
       />}

@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import type { PoolClient, QueryResult } from "pg";
 import {
   createLedger,
+  DefaultLedgerDeletionError,
+  deleteOrLeaveLedger,
   listLedgers,
   updateLedgerSettings
 } from "../src/shared/familyService.js";
@@ -162,6 +164,84 @@ describe("multi-ledger family service", () => {
       values?.[0] === "selected-ledger"
     ));
   });
+
+  it("soft deletes an owned non-default ledger and revokes sharing", async () => {
+    const calls: Array<{ text: string; values?: unknown[] }> = [];
+    const client = familyClient((text, values) => {
+      calls.push({ text, values });
+      if (/select fl\.owner_id, fl\.is_default/i.test(text)) {
+        return result([{
+          owner_id: "owner-id",
+          is_default: false,
+          member_id: null
+        }]);
+      }
+      return result([]);
+    });
+
+    const response = await deleteOrLeaveLedger(
+      client,
+      identity,
+      "owned-ledger"
+    );
+
+    assert.deepEqual(response, { action: "DELETED" });
+    assert.ok(calls.some(({ text }) =>
+      /set deleted_at = now\(\)/i.test(text)
+    ));
+    assert.equal(calls.filter(({ text }) =>
+      /delete from ledger_(member|invitation)/i.test(text)
+    ).length, 2);
+  });
+
+  it("leaves a shared ledger without deleting the owner's ledger", async () => {
+    const calls: Array<{ text: string; values?: unknown[] }> = [];
+    const client = familyClient((text, values) => {
+      calls.push({ text, values });
+      if (/select fl\.owner_id, fl\.is_default/i.test(text)) {
+        return result([{
+          owner_id: "another-owner",
+          is_default: false,
+          member_id: "owner-id"
+        }]);
+      }
+      return result([]);
+    });
+
+    const response = await deleteOrLeaveLedger(
+      client,
+      identity,
+      "shared-ledger"
+    );
+
+    assert.deepEqual(response, { action: "LEFT" });
+    assert.ok(calls.some(({ text, values }) =>
+      /delete from ledger_member where ledger_id = \$1 and member_id = \$2/i.test(text)
+      && values?.[0] === "shared-ledger"
+      && values?.[1] === "owner-id"
+    ));
+    assert.ok(calls.every(({ text }) =>
+      !/update family_ledger/i.test(text)
+    ));
+  });
+
+  it("protects the default ledger from deletion", async () => {
+    const client = familyClient((text) => {
+      if (/select fl\.owner_id, fl\.is_default/i.test(text)) {
+        return result([{
+          owner_id: "owner-id",
+          is_default: true,
+          member_id: null
+        }]);
+      }
+      return result([]);
+    });
+
+    await assert.rejects(
+      deleteOrLeaveLedger(client, identity, "owner-id"),
+      DefaultLedgerDeletionError
+    );
+  });
 });
 
 describe("multi-ledger migration", () => {
@@ -177,5 +257,11 @@ describe("multi-ledger migration", () => {
     assert.match(sql, /ledger_member_ledger_member_key/i);
     assert.match(sql, /ledger_invitation_ledger_email_key/i);
     assert.match(sql, /create constraint trigger family_ledger_default_required/i);
+    const softDeleteSql = await readFile(
+      new URL("../migrations/006_soft_delete_ledgers.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(softDeleteSql, /add column if not exists deleted_at/i);
+    assert.match(softDeleteSql, /where deleted_at is null/i);
   });
 });

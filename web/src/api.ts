@@ -92,6 +92,13 @@ export class BookkeeperApi {
     )
   }
 
+  deleteLedger(ledgerId: string) {
+    return this.request<{ action: 'DELETED' | 'LEFT' }>(
+      `family/ledgers/${encodeURIComponent(ledgerId)}`,
+      { method: 'DELETE' },
+    )
+  }
+
   async getMembers(ledgerId?: string | null): Promise<FamilyMember[]> {
     const response = await this.request<{ members?: FamilyMember[] } | FamilyMember[]>('family/members', undefined, ledgerId)
     return Array.isArray(response) ? response : response.members ?? []

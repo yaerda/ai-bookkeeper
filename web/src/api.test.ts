@@ -73,6 +73,21 @@ describe('API authorization and permission boundaries', () => {
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ mode: 'FAMILY', name: '共同账本' })
   })
 
+  it('uses the same delete endpoint for owner deletion and invited-member leave', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(
+      '{"action":"LEFT"}',
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token', () => 'EDITOR')
+
+    await expect(api.deleteLedger('shared-ledger')).resolves.toEqual({ action: 'LEFT' })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://api.example/api/family/ledgers/shared-ledger')
+    expect((init as RequestInit).method).toBe('DELETE')
+  })
+
   it('blocks non-owner family administration without network access', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

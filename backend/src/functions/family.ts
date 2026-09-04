@@ -11,6 +11,8 @@ import { transaction } from "../shared/db.js";
 import {
   acceptInvitation,
   createLedger,
+  DefaultLedgerDeletionError,
+  deleteOrLeaveLedger,
   inviteMember,
   listLedgers,
   listMembers,
@@ -62,6 +64,12 @@ function failure(
   if (error instanceof LedgerAccessDeniedError) {
     return { status: 403, jsonBody: { error: "forbidden" } };
   }
+  if (error instanceof DefaultLedgerDeletionError) {
+    return {
+      status: 409,
+      jsonBody: { error: "default_ledger_cannot_be_deleted" }
+    };
+  }
   context.error("Family ledger request failed", error);
   return { status: 500, jsonBody: { error: "internal_error" } };
 }
@@ -109,6 +117,20 @@ export function familyMembers(
       listMembers(client, identity, requestedLedgerId(request))
     )
   );
+}
+
+export function familyLedgerDelete(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  return authenticated(request, context, async (identity) => {
+    const ledgerId = uuidSchema.parse(request.params.ledgerId);
+    const result = await transaction(getConfig(), (client) =>
+      deleteOrLeaveLedger(client, identity, ledgerId)
+    );
+    if (!result) throw new LedgerAccessDeniedError();
+    return result;
+  });
 }
 
 export async function familySettings(
@@ -217,6 +239,12 @@ app.http("familyMembers", {
   authLevel: "anonymous",
   route: "family/members",
   handler: familyMembers
+});
+app.http("familyLedgerDelete", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "family/ledgers/{ledgerId}",
+  handler: familyLedgerDelete
 });
 app.http("familySettings", {
   methods: ["PATCH"],

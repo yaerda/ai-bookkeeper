@@ -43,7 +43,7 @@ export async function resolveLedgerAccess(
     const owned = await client.query<OwnedLedgerRow>(
       `select id as ledger_id, owner_id
          from family_ledger
-        where owner_id = $1 and is_default`,
+        where owner_id = $1 and is_default and deleted_at is null`,
       [userId]
     );
     const ledger = owned.rows[0];
@@ -65,6 +65,7 @@ export async function resolveLedgerAccess(
        left join ledger_member lm
          on lm.ledger_id = fl.id and lm.member_id = $2
       where fl.id = $1
+        and fl.deleted_at is null
         and (fl.owner_id = $2 or lm.member_id is not null)`,
     [requestedLedgerId, userId]
   );
