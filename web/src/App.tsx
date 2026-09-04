@@ -566,7 +566,7 @@ function TwelveMonthTrend({
     () => calculateMonthlyTrend(transactions, endMonth),
     [endMonth, transactions],
   )
-  const width = 12 * 76 + 48
+  const width = 12 * 76 + 28
   const height = 170
   const plotTop = 18
   const plotBottom = 126
@@ -576,7 +576,7 @@ function TwelveMonthTrend({
   const minimum = Math.min(0, ...values)
   const maximum = Math.max(1, ...values)
   const range = maximum - minimum || 1
-  const x = (index: number) => 68 + index * 76
+  const x = (index: number) => 28 + index * 76
   const y = (value: number) => plotBottom - ((value - minimum) / range) * (plotBottom - plotTop)
   const line = (key: 'income' | 'expense' | 'balance') =>
     points.map((point, index) => `${x(index)},${y(point[key])}`).join(' ')
@@ -616,40 +616,48 @@ function TwelveMonthTrend({
           ))}
         </div>
       </div>
-      <div
-        className="trend-scroll"
-        ref={scrollRef}
-        onWheel={(event) => {
-          if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-            event.currentTarget.scrollLeft += event.deltaY
-          }
-        }}
-      >
-        <svg className="trend-chart" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="过去十二个月收入、支出和结余趋势">
+      <div className="trend-chart-layout">
+        <svg className="trend-axis" width="54" height={height} viewBox={`0 0 54 ${height}`} aria-hidden="true">
           {ticks.map((tick, index) => {
             const lineY = y(tick)
             return <g key={`${tick}-${index}`}>
-              <line className="trend-grid-line" x1="54" x2={width - 20} y1={lineY} y2={lineY} />
-              <text className="trend-y-label" x="48" y={lineY + 3} textAnchor="end">{axisLabel(tick)}</text>
+              <text className="trend-y-label" x="49" y={lineY + 3} textAnchor="end">{axisLabel(tick)}</text>
+              <line className="trend-axis-tick" x1="50" x2="54" y1={lineY} y2={lineY} />
             </g>
           })}
-          {minimum < 0 && (
-            <line className="trend-zero-line" x1="54" x2={width - 20} y1={y(0)} y2={y(0)} />
-          )}
-          {visibleSeries.map((series) => (
-            <polyline className={`trend-line ${series}`} key={series} points={line(series)} />
-          ))}
-          {points.map((point, index) => (
-            <g key={point.month}>
-              {visibleSeries.map((series) => (
-                <circle className={`trend-point ${series}`} key={series} cx={x(index)} cy={y(point[series])} r="3">
-                  <title>{point.month} {seriesMeta[series].label} {currency.format(point[series])}</title>
-                </circle>
-              ))}
-              <text className="trend-month-label" x={x(index)} y="154" textAnchor="middle">{point.label}</text>
-            </g>
-          ))}
         </svg>
+        <div
+          className="trend-scroll"
+          ref={scrollRef}
+          onWheel={(event) => {
+            if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+              event.currentTarget.scrollLeft += event.deltaY
+            }
+          }}
+        >
+          <svg className="trend-chart" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="过去十二个月收入、支出和结余趋势">
+            {ticks.map((tick, index) => {
+              const lineY = y(tick)
+              return <line className="trend-grid-line" key={`${tick}-${index}`} x1="0" x2={width - 20} y1={lineY} y2={lineY} />
+            })}
+            {minimum < 0 && (
+              <line className="trend-zero-line" x1="0" x2={width - 20} y1={y(0)} y2={y(0)} />
+            )}
+            {visibleSeries.map((series) => (
+              <polyline className={`trend-line ${series}`} key={series} points={line(series)} />
+            ))}
+            {points.map((point, index) => (
+              <g key={point.month}>
+                {visibleSeries.map((series) => (
+                  <circle className={`trend-point ${series}`} key={series} cx={x(index)} cy={y(point[series])} r="3">
+                    <title>{point.month} {seriesMeta[series].label} {currency.format(point[series])}</title>
+                  </circle>
+                ))}
+                <text className="trend-month-label" x={x(index)} y="154" textAnchor="middle">{point.label}</text>
+              </g>
+            ))}
+          </svg>
+        </div>
       </div>
     </section>
   )
@@ -695,6 +703,7 @@ function FamilyPanel({
         {ledger && owner && <section className="drawer-section mode-settings">
           <div className="mode-heading"><div><h3>账本模式</h3><p>{ledger.mode === 'FAMILY' ? '家庭账本可与受邀成员共同使用。' : '个人账本仅你自己可访问。'}</p></div><span className={`mode-badge ${ledger.mode.toLowerCase()}`}>{ledger.mode === 'FAMILY' ? '家庭' : '个人'}</span></div>
           <label>账本名称<input maxLength={60} value={ledgerName} onChange={(event) => setLedgerName(event.target.value)} /></label>
+          <button className="primary wide" disabled={loading || !ledgerName.trim() || ledgerName.trim() === ledger.name} onClick={() => void onSettings(ledger.mode, ledgerName.trim())}>保存账本名称</button>
           {ledger.mode === 'PERSONAL'
             ? <button className="secondary wide" disabled={loading} onClick={() => void onSettings('FAMILY', ledgerName)}>转换为家庭账本</button>
             : <button className="danger-button wide" disabled={loading} onClick={() => setConfirmPersonal(true)}>转换为个人账本</button>}
@@ -749,6 +758,7 @@ function Dashboard({
   const [monthPickerOpen, setMonthPickerOpen] = useState(false)
   const [categoryDetail, setCategoryDetail] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const accountMenuRef = useRef<HTMLDivElement>(null)
   const [privacySettingsOpen, setPrivacySettingsOpen] = useState(false)
   const [passcodePromptOpen, setPasscodePromptOpen] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(false)
@@ -842,6 +852,17 @@ function Dashboard({
       document.removeEventListener('visibilitychange', hideIfExpired)
     }
   }, [sensitiveVisible])
+
+  useEffect(() => {
+    if (!accountMenuOpen) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [accountMenuOpen])
 
   const revealSensitive = () => {
     sensitiveDeadline.current = Date.now() + 5 * 60 * 1000
@@ -947,7 +968,7 @@ function Dashboard({
             <span>{selectedLedger?.mode === 'FAMILY' ? '家庭账本' : '个人账本'}</span>
             <strong>{selectedLedger?.name ?? '我的账本'} <i aria-hidden="true">›</i></strong>
           </button>
-          <div className="account-menu-wrap">
+          <div className="account-menu-wrap" ref={accountMenuRef}>
             <button className="account-button" aria-expanded={accountMenuOpen} aria-label="账户菜单" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{(account.name || account.username).slice(0, 1).toUpperCase()}</span><span className="account-name">{account.name || account.username}</span></button>
             {accountMenuOpen && <div className="account-popover">
               <div className="account-summary"><strong>{account.name || account.username}</strong><small>{account.username}</small></div>

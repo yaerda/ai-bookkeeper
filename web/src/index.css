@@ -163,7 +163,10 @@ h1, h2, h3, p { margin: 0; }
 .trend-legend .expense { color: #e66f56; }
 .trend-legend .balance { color: #6c72b8; }
 .trend-legend button:not(.active) { color: #a1aaa6; }
-.trend-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #aec2b9 transparent; }
+.trend-chart-layout { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: start; }
+.trend-axis { position: relative; z-index: 2; display: block; background: #fff; }
+.trend-axis-tick { stroke: #c6cfca; stroke-width: 1; }
+.trend-scroll { min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #aec2b9 transparent; }
 .trend-chart { display: block; }
 .trend-grid-line { stroke: #e8ece8; stroke-width: 1; }
 .trend-zero-line { stroke: #b8c1bd; stroke-width: 1; stroke-dasharray: 4 4; }
@@ -180,8 +183,8 @@ h1, h2, h3, p { margin: 0; }
 
 .month-panel-button { position: absolute; top: 82px; z-index: 4; width: 34px; height: 58px; border: 1px solid var(--line); color: var(--green); background: rgba(255,255,255,.94); box-shadow: 0 7px 20px rgba(31,71,56,.1); backdrop-filter: blur(10px); font: 400 29px/1 serif; }
 .month-panel-button:hover { background: #edf5f1; }
-.month-panel-button.previous { left: -17px; border-radius: 14px 4px 4px 14px; }
-.month-panel-button.next { right: -17px; border-radius: 4px 14px 14px 4px; }
+.month-panel-button.previous { left: -46px; border-radius: 14px 4px 4px 14px; }
+.month-panel-button.next { right: -46px; border-radius: 4px 14px 14px 4px; }
 .month-grid-launcher { position: fixed; left: 50%; bottom: 18px; z-index: 30; width: 54px; height: 42px; padding: 10px 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.5); border-radius: 16px; background: var(--green); box-shadow: 0 10px 28px rgba(23,79,64,.28); }
 .month-grid-launcher:hover { bottom: 21px; background: var(--green-dark); }
 .month-grid-launcher i { width: 5px; height: 5px; border-radius: 2px; background: #fff; }
