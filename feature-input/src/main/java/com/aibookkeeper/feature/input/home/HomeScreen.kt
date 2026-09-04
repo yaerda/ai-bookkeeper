@@ -71,7 +71,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -113,10 +112,9 @@ fun HomeScreen(
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
     var showPromptReview by remember { mutableStateOf(false) }
-    var startWithVoice by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
-    var stopVoiceRequest by remember { mutableIntStateOf(0) }
-    var voiceStartedFromFab by remember { mutableStateOf(false) }
+    var pendingVoiceRequest by remember { mutableStateOf(false) }
+    val homeVoiceGestureActive = remember { mutableStateOf(false) }
     var showLedgerMenu by remember { mutableStateOf(false) }
 
     // Auto-open AI sheet when returning from CaptureScreen
@@ -141,6 +139,105 @@ fun HomeScreen(
                 viewModel.resetVoiceStatus()
             }
             else -> Unit
+        }
+    }
+
+    val speechRecognizer = remember {
+        SpeechRecognizer.createSpeechRecognizer(context)
+    }
+
+    DisposableEffect(speechRecognizer) {
+        onDispose {
+            speechRecognizer.cancel()
+            speechRecognizer.destroy()
+        }
+    }
+
+    remember(speechRecognizer) {
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onResults(results: Bundle?) {
+                isRecording = false
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull()?.trim()
+                if (!text.isNullOrBlank()) {
+                    aiInput = if (aiInput.isBlank()) text else "$aiInput\n$text"
+                }
+                if (!homeVoiceGestureActive.value) showAiSheet = true
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onError(error: Int) {
+                isRecording = false
+                if (!homeVoiceGestureActive.value) showAiSheet = true
+                val msg = when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音内容"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
+                    SpeechRecognizer.ERROR_AUDIO -> "录音错误"
+                    SpeechRecognizer.ERROR_NETWORK -> "网络不可用，请检查连接"
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "语音识别器正忙，请重试"
+                    else -> "语音识别失败 (错误码: $error)"
+                }
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isRecording = false
+            }
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        true
+    }
+
+    fun startLocalSpeechRecognition() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1_500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+        }
+        try {
+            isRecording = true
+            speechRecognizer.startListening(intent)
+        } catch (error: IllegalStateException) {
+            isRecording = false
+            if (!homeVoiceGestureActive.value) showAiSheet = true
+            Toast.makeText(context, error.message ?: "语音识别暂时不可用，请重试", Toast.LENGTH_SHORT).show()
+        } catch (_: SecurityException) {
+            isRecording = false
+            Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun stopLocalSpeechRecognition() {
+        speechRecognizer.stopListening()
+        isRecording = false
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        pendingVoiceRequest = false
+        homeVoiceGestureActive.value = false
+        if (granted) {
+            startLocalSpeechRecognition()
+            showAiSheet = true
+        } else {
+            Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startVoiceWithPermissionGuard() {
+        if (context.hasAudioPermission()) {
+            if (isRecording) stopLocalSpeechRecognition() else startLocalSpeechRecognition()
+        } else if (!pendingVoiceRequest) {
+            pendingVoiceRequest = true
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -235,19 +332,19 @@ fun HomeScreen(
                             isProcessing = false,
                             hasSubmitContent = true,
                             onVoiceToggle = {
-                                if (isRecording) {
-                                    stopVoiceRequest++
-                                } else {
-                                    voiceStartedFromFab = true
-                                    startWithVoice = true
-                                    showAiSheet = true
-                                }
+                                if (!isRecording) homeVoiceGestureActive.value = true
+                                startVoiceWithPermissionGuard()
                             },
                             onHoldReleased = {
-                                voiceStartedFromFab = false
+                                homeVoiceGestureActive.value = false
+                                showAiSheet = true
+                            },
+                            onHoldCancelled = {
+                                homeVoiceGestureActive.value = false
+                                speechRecognizer.cancel()
+                                isRecording = false
                             },
                             onSubmit = {
-                                voiceStartedFromFab = false
                                 showAiSheet = true
                             }
                         ),
@@ -338,90 +435,8 @@ fun HomeScreen(
     // AI 记账 BottomSheet
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        var pendingVoiceRequest by remember { mutableStateOf(false) }
         var isImageOcrProcessing by remember { mutableStateOf(false) }
 
-        // Local SpeechRecognizer (no system UI)
-        val speechRecognizer = remember {
-            SpeechRecognizer.createSpeechRecognizer(context)
-        }
-
-        DisposableEffect(Unit) {
-            onDispose {
-                speechRecognizer.cancel()
-                speechRecognizer.destroy()
-                isRecording = false
-                pendingVoiceRequest = false
-                startWithVoice = false
-                voiceStartedFromFab = false
-            }
-        }
-
-        remember(speechRecognizer) {
-            speechRecognizer.setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    isRecording = false
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val text = matches?.firstOrNull()?.trim()
-                    if (!text.isNullOrBlank()) {
-                        aiInput = if (aiInput.isBlank()) text else "$aiInput\n$text"
-                    }
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onError(error: Int) {
-                    isRecording = false
-                    val msg = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音内容"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
-                        SpeechRecognizer.ERROR_AUDIO -> "录音错误"
-                        SpeechRecognizer.ERROR_NETWORK -> "网络不可用，请检查连接"
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "语音识别器正忙，请重试"
-                        else -> "语音识别失败 (错误码: $error)"
-                    }
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                }
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    isRecording = false
-                }
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            true
-        }
-
-        fun startLocalSpeechRecognition() {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1_500L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
-            }
-            try {
-                isRecording = true
-                speechRecognizer.startListening(intent)
-            } catch (error: IllegalStateException) {
-                isRecording = false
-                voiceStartedFromFab = false
-                Toast.makeText(context, error.message ?: "语音识别暂时不可用，请重试", Toast.LENGTH_SHORT).show()
-            } catch (_: SecurityException) {
-                isRecording = false
-                voiceStartedFromFab = false
-                Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        fun stopLocalSpeechRecognition() {
-            speechRecognizer.stopListening()
-            isRecording = false
-            voiceStartedFromFab = false
-        }
         val photoPickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.PickVisualMedia()
         ) { uri ->
@@ -445,56 +460,11 @@ fun HomeScreen(
             }
         }
 
-        val audioPermissionLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted) {
-                pendingVoiceRequest = false
-                startLocalSpeechRecognition()
-            } else {
-                pendingVoiceRequest = false
-                voiceStartedFromFab = false
-                Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        fun startVoiceWithPermissionGuard() {
-            if (context.hasAudioPermission()) {
-                if (isRecording) {
-                    stopLocalSpeechRecognition()
-                } else {
-                    startLocalSpeechRecognition()
-                }
-            } else if (!pendingVoiceRequest) {
-                pendingVoiceRequest = true
-                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        }
-
-        // Auto-start voice recording if opened via long-press
-        if (startWithVoice) {
-            LaunchedEffect(Unit) {
-                kotlinx.coroutines.delay(300)
-                startVoiceWithPermissionGuard()
-                startWithVoice = false
-            }
-        }
-
-        LaunchedEffect(stopVoiceRequest) {
-            if (stopVoiceRequest > 0 && isRecording) {
-                stopLocalSpeechRecognition()
-            }
-        }
-
         ModalBottomSheet(
             onDismissRequest = {
-                if (voiceStartedFromFab) {
-                    return@ModalBottomSheet
-                }
                 speechRecognizer.cancel()
                 isRecording = false
                 pendingVoiceRequest = false
-                startWithVoice = false
                 showPromptReview = false
                 showAiSheet = false
             },

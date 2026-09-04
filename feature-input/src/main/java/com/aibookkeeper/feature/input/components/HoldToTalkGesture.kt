@@ -25,12 +25,14 @@ internal fun Modifier.holdToTalkGesture(
     hasSubmitContent: Boolean,
     onVoiceToggle: () -> Unit,
     onHoldReleased: () -> Unit = {},
+    onHoldCancelled: () -> Unit = {},
     onSubmit: () -> Unit
 ): Modifier {
     val scope = rememberCoroutineScope()
     var stopRecordingJob by remember { mutableStateOf<Job?>(null) }
     val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
     val currentOnHoldReleased by rememberUpdatedState(onHoldReleased)
+    val currentOnHoldCancelled by rememberUpdatedState(onHoldCancelled)
     val currentOnSubmit by rememberUpdatedState(onSubmit)
     val currentIsRecording by rememberUpdatedState(isRecording)
     val currentIsProcessing by rememberUpdatedState(isProcessing)
@@ -41,7 +43,6 @@ internal fun Modifier.holdToTalkGesture(
         stopRecordingJob = scope.launch {
             delay(RELEASE_GRACE_MILLIS)
             if (currentIsRecording) currentOnVoiceToggle()
-            currentOnHoldReleased()
         }
     }
 
@@ -70,7 +71,13 @@ internal fun Modifier.holdToTalkGesture(
                 if (!currentIsProcessing && !currentIsRecording) {
                     currentOnVoiceToggle()
                 }
-                waitForUpOrCancellation()?.consume()
+                val release = waitForUpOrCancellation()
+                if (release != null) {
+                    release.consume()
+                    currentOnHoldReleased()
+                } else {
+                    currentOnHoldCancelled()
+                }
                 scheduleStop()
             }
         }
