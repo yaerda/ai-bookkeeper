@@ -21,6 +21,11 @@ import {
   verifyPasscode,
 } from './privacy'
 import type { PrivacySettings } from './privacy'
+import {
+  loadDisplayName,
+  saveDisplayName,
+  validateDisplayName,
+} from './profile'
 import type {
   FamilyInvitation,
   FamilyLedger,
@@ -283,6 +288,47 @@ function PrivacySettingsModal({
           {hasPasscode && <button type="button" className="danger-link" disabled={saving || !currentPasscode} onClick={() => void clearPasscode()}>关闭并清除口令</button>}
           <button type="button" className="secondary" onClick={onClose}>取消</button>
           <button className="primary" disabled={saving}>{saving ? '保存中…' : '保存设置'}</button>
+        </div>
+      </form>
+    </section>
+  </div>
+}
+
+function DisplayNameModal({
+  currentName,
+  loginName,
+  onClose,
+  onSave,
+}: {
+  currentName: string
+  loginName: string
+  onClose: () => void
+  onSave: (name: string) => void
+}) {
+  const [name, setName] = useState(currentName)
+  const [error, setError] = useState('')
+
+  const save = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!validateDisplayName(name)) {
+      setError('显示名称需要为 1 到 50 个字符')
+      return
+    }
+    onSave(name)
+    onClose()
+  }
+
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <section className="modal privacy-settings-modal" role="dialog" aria-modal="true" aria-labelledby="display-name-title" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-header"><div><p className="eyebrow">个人资料</p><h2 id="display-name-title">修改显示名称</h2></div><button className="icon-button" aria-label="关闭" onClick={onClose}>×</button></div>
+      <p className="privacy-settings-note">名称按登录账号保存在当前浏览器中，只改变页面问候语和账户菜单，不会修改账本名称。</p>
+      <form className="privacy-settings-form" onSubmit={save}>
+        <label>显示名称<input autoFocus maxLength={50} value={name} onChange={(event) => { setName(event.target.value); setError('') }} /></label>
+        {error && <div className="field-error" role="alert">{error}</div>}
+        <div className="modal-actions">
+          <button type="button" className="danger-link" onClick={() => { onSave(''); onClose() }}>恢复登录名称（{loginName}）</button>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button className="primary">保存名称</button>
         </div>
       </form>
     </section>
@@ -762,10 +808,14 @@ function mergeTransactions(previous: Transaction[], incoming: Transaction[]) {
 
 function Dashboard({
   account,
+  displayName,
+  onDisplayNameChange,
   privacySettings,
   onPrivacySettingsChange,
 }: {
   account: AccountInfo
+  displayName: string
+  onDisplayNameChange: (name: string) => void
   privacySettings: PrivacySettings
   onPrivacySettingsChange: (settings: PrivacySettings) => void
 }) {
@@ -784,6 +834,7 @@ function Dashboard({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement>(null)
   const [privacySettingsOpen, setPrivacySettingsOpen] = useState(false)
+  const [displayNameOpen, setDisplayNameOpen] = useState(false)
   const [passcodePromptOpen, setPasscodePromptOpen] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(false)
   const sensitiveDeadline = useRef(0)
@@ -1008,11 +1059,12 @@ function Dashboard({
             <strong>{selectedLedger?.name ?? '我的账本'} <i aria-hidden="true">›</i></strong>
           </button>
           <div className="account-menu-wrap" ref={accountMenuRef}>
-            <button className="account-button" aria-expanded={accountMenuOpen} aria-label="账户菜单" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{(account.name || account.username).slice(0, 1).toUpperCase()}</span><span className="account-name">{account.name || account.username}</span></button>
+            <button className="account-button" aria-expanded={accountMenuOpen} aria-label="账户菜单" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{displayName.slice(0, 1).toUpperCase()}</span><span className="account-name">{displayName}</span></button>
             {accountMenuOpen && <div className="account-popover">
-              <div className="account-summary"><strong>{account.name || account.username}</strong><small>{account.username}</small></div>
+              <div className="account-summary"><strong>{displayName}</strong><small>{account.username}</small></div>
               <a href={GITHUB_URL} target="_blank" rel="noreferrer"><span aria-hidden="true">⌘</span><span><strong>GitHub 项目</strong><small>查看源码与版本</small></span></a>
               <a href={ANDROID_DOWNLOAD_URL}><span aria-hidden="true">↓</span><span><strong>下载 Android</strong><small>获取最新 APK</small></span></a>
+              <button className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setDisplayNameOpen(true) }}><span aria-hidden="true">✎</span><span><strong>修改显示名称</strong><small>当前：{displayName}</small></span></button>
               <button className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setPrivacySettingsOpen(true) }}><span aria-hidden="true">●</span><span><strong>隐私口令</strong><small>{privacySettings.passcodeHash ? '已启用 · 管理设置' : '保护登录和收入'}</small></span></button>
               <button className="account-logout" onClick={() => void logout(account)}>退出登录</button>
             </div>}
@@ -1021,7 +1073,7 @@ function Dashboard({
       </header>
       <main className="content">
         <section className="page-heading">
-          <div><p className="eyebrow">财务概览</p><h1>你好，{account.name?.split(' ')[0] || '今天也要好好生活'}</h1><p>每一笔认真记录，都让未来更从容。</p></div>
+          <div><p className="eyebrow">财务概览</p><h1>你好，{displayName}</h1><p>每一笔认真记录，都让未来更从容。</p></div>
           <div className="heading-controls">
             <button className="month-select" onClick={() => setMonthPickerOpen(true)}>
               <span>月份</span><strong>{monthLabel(month)}</strong>
@@ -1097,6 +1149,7 @@ function Dashboard({
         }}
       />}
       {createLedgerOpen && <CreateLedgerModal saving={saving} onClose={() => setCreateLedgerOpen(false)} onCreate={createLedger} />}
+      {displayNameOpen && <DisplayNameModal currentName={displayName} loginName={account.name || account.username} onClose={() => setDisplayNameOpen(false)} onSave={onDisplayNameChange} />}
       {privacySettingsOpen && <PrivacySettingsModal settings={privacySettings} onClose={() => setPrivacySettingsOpen(false)} onSave={onPrivacySettingsChange} />}
       {passcodePromptOpen && <PasscodePrompt settings={privacySettings} title="展示收入与结余" description="验证隐私口令后，敏感金额将展示 5 分钟。" onCancel={() => setPasscodePromptOpen(false)} onSuccess={() => { setPasscodePromptOpen(false); revealSensitive() }} />}
       {familyOpen && <FamilyPanel
@@ -1125,6 +1178,7 @@ function Dashboard({
 export default function App() {
   const [account, setAccount] = useState<AccountInfo | null>(() => msalInstance?.getActiveAccount() ?? msalInstance?.getAllAccounts()[0] ?? null)
   const [privacyOverrides, setPrivacyOverrides] = useState<Record<string, PrivacySettings>>({})
+  const [displayNameOverrides, setDisplayNameOverrides] = useState<Record<string, string | null>>({})
   const [unlockedAccountId, setUnlockedAccountId] = useState<string | null>(null)
   const authError = configError
 
@@ -1143,6 +1197,8 @@ export default function App() {
   if (!account) return <LoginScreen error={authError || undefined} />
   const accountId = account.homeAccountId
   const privacySettings = privacyOverrides[accountId] ?? loadPrivacySettings(accountId)
+  const loginName = account.name || account.username
+  const displayName = displayNameOverrides[accountId] ?? loadDisplayName(accountId) ?? loginName
   if (privacySettings.requireOnLogin && privacySettings.passcodeHash && unlockedAccountId !== accountId) {
     return <PasscodePrompt
       settings={privacySettings}
@@ -1154,6 +1210,11 @@ export default function App() {
   }
   return <Dashboard
     account={account}
+    displayName={displayName}
+    onDisplayNameChange={(next) => {
+      const saved = saveDisplayName(accountId, next)
+      setDisplayNameOverrides((current) => ({ ...current, [accountId]: saved }))
+    }}
     privacySettings={privacySettings}
     onPrivacySettingsChange={(next) => {
       savePrivacySettings(accountId, next)
