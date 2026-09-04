@@ -24,6 +24,7 @@ import kotlinx.serialization.json.put
 import retrofit2.HttpException
 import java.time.LocalDate
 import javax.inject.Inject
+import kotlin.math.abs
 
 /**
  * Online AI extractor that calls Azure OpenAI Chat Completions
@@ -38,12 +39,12 @@ class AzureOpenAiExtractor @Inject constructor(
 
     companion object {
         private const val OCR_SYSTEM_PROMPT_SUFFIX = """
-            
+
             注意：以下文字来自 OCR 识别，可能包含识别错误。请尽量修正明显的 OCR 错误后再提取。
         """
 
         private const val IMAGE_SYSTEM_PROMPT_SUFFIX = """
-            
+
             注意：用户发送的是一张图片（支付截图、小票、外卖订单截图等）。
             请直接从图片中识别并提取消费/收入信息。忽略无关的数字（如订单号、手机号、时间戳等），
             只关注实际支付/收入的金额。如果图片内容不是消费或收入相关，confidence 请给 0.1 以下。
@@ -122,15 +123,14 @@ class AzureOpenAiExtractor @Inject constructor(
 
             val dto = json.decodeFromString<AiExtractionDto>(normalizeJsonContent(content))
 
-            ExtractionResult(
+            toExtractionResult(
                 amount = dto.amount,
                 type = dto.type,
                 category = dto.category,
                 merchantName = dto.merchantName,
                 date = dto.date ?: todayStr,
                 note = dto.note,
-                confidence = dto.confidence,
-                source = ExtractionSource.AZURE_AI
+                confidence = dto.confidence
             )
         }
     }
@@ -198,27 +198,25 @@ class AzureOpenAiExtractor @Inject constructor(
 
             val dto = json.decodeFromString<VisionExtractionDto>(normalizeJsonContent(content))
 
-            val summary = ExtractionResult(
+            val summary = toExtractionResult(
                 amount = dto.amount,
                 type = dto.type,
                 category = dto.category,
                 merchantName = dto.merchantName,
                 date = dto.date ?: todayStr,
                 note = dto.note,
-                confidence = dto.confidence,
-                source = ExtractionSource.AZURE_AI
+                confidence = dto.confidence
             )
 
             val items = dto.items.map { item ->
-                ExtractionResult(
+                toExtractionResult(
                     amount = item.amount,
                     type = item.type,
                     category = item.category,
                     merchantName = item.merchantName ?: dto.merchantName,
                     date = item.date ?: dto.date ?: todayStr,
                     note = item.note,
-                    confidence = item.confidence,
-                    source = ExtractionSource.AZURE_AI
+                    confidence = item.confidence
                 )
             }
 
@@ -267,17 +265,37 @@ class AzureOpenAiExtractor @Inject constructor(
 
             val dto = json.decodeFromString<AiExtractionDto>(normalizeJsonContent(content))
 
-            ExtractionResult(
+            toExtractionResult(
                 amount = dto.amount,
                 type = dto.type,
                 category = dto.category,
                 merchantName = dto.merchantName,
                 date = dto.date ?: todayStr,
                 note = dto.note,
-                confidence = dto.confidence,
-                source = ExtractionSource.AZURE_AI
+                confidence = dto.confidence
             )
         }
+    }
+
+    private fun toExtractionResult(
+        amount: Double?,
+        type: String,
+        category: String,
+        merchantName: String?,
+        date: String,
+        note: String?,
+        confidence: Float
+    ): ExtractionResult {
+        return ExtractionResult(
+            amount = amount?.let(::abs),
+            type = type,
+            category = category,
+            merchantName = merchantName,
+            date = date,
+            note = note,
+            confidence = confidence,
+            source = ExtractionSource.AZURE_AI
+        )
     }
 
     private fun normalizeJsonContent(content: String): String {

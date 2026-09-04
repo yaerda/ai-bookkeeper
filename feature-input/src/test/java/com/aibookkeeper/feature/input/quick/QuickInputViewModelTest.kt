@@ -169,6 +169,19 @@ class QuickInputViewModelTest {
         }
 
         @Test
+        fun should_ignoreRepeatedCategorySave_while_saveIsStarting() = runTest {
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitCategoryAmount(35.0, "餐饮")
+            vm.submitCategoryAmount(35.0, "餐饮")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify(exactly = 1) { transactionRepository.create(any()) }
+        }
+
+        @Test
         fun should_useNotificationQuickSource_when_categoryAmountSaved() = runTest {
             coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
             coEvery { transactionRepository.create(any()) } returns Result.success(1L)
@@ -230,6 +243,24 @@ class QuickInputViewModelTest {
         }
 
         @Test
+        fun should_ignoreRepeatedConfirm_while_saveIsStarting() = runTest {
+            coEvery { aiExtractionRepository.extract("午饭35") } returns
+                    Result.success(createExtractionResult())
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify(exactly = 1) { transactionRepository.create(any()) }
+        }
+
+        @Test
         fun should_detectIncomeType_when_extractionTypeIsIncome() = runTest {
             val extraction = createExtractionResult(
                 amount = 8000.0,
@@ -280,6 +311,18 @@ class QuickInputViewModelTest {
 
             val state = vm.uiState.value as QuickInputUiState.Idle
             assertNull(state.preselectedCategory)
+        }
+
+        @Test
+        fun should_preservePreselectedCategory_when_resetAfterSaveCalled() {
+            val vm = createViewModel()
+            vm.setPreselectedCategory("餐饮", "🍚")
+
+            vm.resetAfterSave()
+
+            val state = vm.uiState.value as QuickInputUiState.Idle
+            assertEquals("餐饮", state.preselectedCategory)
+            assertEquals("🍚", state.preselectedCategoryIcon)
         }
     }
 

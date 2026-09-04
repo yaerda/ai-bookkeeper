@@ -7,6 +7,7 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -72,6 +73,7 @@ class BillsViewModelTest {
         every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
         every { transactionRepository.observeMonthlyExpense(any()) } returns flowOf(expense)
         every { transactionRepository.observeMonthlyIncome(any()) } returns flowOf(income)
+        every { transactionRepository.observeTransactionMonths() } returns flowOf(emptyList())
 
         return BillsViewModel(transactionRepository)
     }
@@ -270,6 +272,42 @@ class BillsViewModelTest {
                 val state = awaitItem()
                 assertEquals(YearMonth.now(), state.currentMonth)
                 cancelAndIgnoreRemainingEvents()
+            }
+
+            @Test
+            fun should_jumpToHistoricalMonth_when_monthSelected() = runTest {
+                val vm = createViewModel()
+                val historicalMonth = YearMonth.now().minusMonths(5)
+
+                vm.uiState.test {
+                    awaitItem()
+                    awaitItem()
+
+                    vm.selectMonth(historicalMonth)
+
+                    assertEquals(historicalMonth, awaitItem().currentMonth)
+                    cancelAndIgnoreRemainingEvents()
+                }
+            }
+
+            @Test
+            fun should_exposeMonthsContainingTransactions() = runTest {
+                val historicalMonth = YearMonth.now().minusMonths(5)
+                every { transactionRepository.observeTransactionMonths() } returns flowOf(
+                    listOf(TransactionMonthSummary(historicalMonth, 22))
+                )
+                val vm = createViewModel()
+
+                vm.uiState.test {
+                    awaitItem()
+                    val loaded = awaitItem()
+
+                    assertEquals(
+                        TransactionMonthSummary(historicalMonth, 22),
+                        loaded.availableMonths.single()
+                    )
+                    cancelAndIgnoreRemainingEvents()
+                }
             }
         }
     }

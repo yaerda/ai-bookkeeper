@@ -358,7 +358,7 @@ class TransactionRepositoryImplTest {
         @Test
         fun should_returnSuccess_when_updateSucceeds() = runTest {
             every { mapper.toEntity(sampleDomain) } returns sampleEntity
-            coEvery { transactionDao.update(sampleEntity) } just Runs
+            coEvery { transactionDao.updateMonotonic(sampleEntity) } just Runs
 
             val result = repository.update(sampleDomain)
 
@@ -368,7 +368,9 @@ class TransactionRepositoryImplTest {
         @Test
         fun should_returnFailure_when_updateThrows() = runTest {
             every { mapper.toEntity(sampleDomain) } returns sampleEntity
-            coEvery { transactionDao.update(sampleEntity) } throws RuntimeException("update error")
+            coEvery {
+                transactionDao.updateMonotonic(sampleEntity)
+            } throws RuntimeException("update error")
 
             val result = repository.update(sampleDomain)
 
@@ -424,18 +426,20 @@ class TransactionRepositoryImplTest {
     inner class Delete {
 
         @Test
-        fun should_callDaoDelete_when_deleting() = runTest {
-            coEvery { transactionDao.deleteById(42L) } just Runs
+        fun should_createSyncTombstone_when_deleting() = runTest {
+            coEvery { transactionDao.softDeleteById(42L, any()) } just Runs
 
             val result = repository.delete(42L)
 
             assertTrue(result.isSuccess)
-            coVerify { transactionDao.deleteById(42L) }
+            coVerify { transactionDao.softDeleteById(42L, any()) }
         }
 
         @Test
         fun should_returnFailure_when_deleteThrows() = runTest {
-            coEvery { transactionDao.deleteById(42L) } throws RuntimeException("delete error")
+            coEvery {
+                transactionDao.softDeleteById(42L, any())
+            } throws RuntimeException("delete error")
 
             val result = repository.delete(42L)
 
@@ -522,6 +526,69 @@ class TransactionRepositoryImplTest {
 
             coVerify { transactionDao.updateSyncStatus(1L, "SYNCED") }
             coVerify { transactionDao.updateSyncStatus(2L, "SYNCED") }
+        }
+
+        @Test
+        fun should_acknowledgeOnlyExactUploadedSnapshot() = runTest {
+            coEvery {
+                transactionDao.acknowledgeSync(sampleDomain.syncId, any(), 0, 12)
+            } returns 1
+
+            val acknowledged = repository.acknowledgeSynced(
+                sampleDomain.syncId,
+                sampleDomain.updatedAt,
+                0,
+                12
+            )
+
+            assertTrue(acknowledged)
+            coVerify {
+                transactionDao.acknowledgeSync(
+                    sampleDomain.syncId,
+                    any(),
+                    0,
+                    12
+                )
+            }
+        }
+
+        @Test
+        fun should_rebasePendingVersion_withoutChangingLocalPayload() = runTest {
+            coEvery {
+                transactionDao.rebasePendingSync(sampleDomain.syncId, 3, 8)
+            } returns 1
+
+            assertTrue(repository.rebasePendingSync(sampleDomain.syncId, 3, 8))
+
+            coVerify {
+                transactionDao.rebasePendingSync(sampleDomain.syncId, 3, 8)
+            }
+        }
+
+        @Test
+        fun should_mapRemoteCategoryByName_beforeMerging() = runTest {
+            val remote = sampleDomain.copy(
+                id = 0,
+                categoryId = 999,
+                categoryName = "餐饮",
+                serverVersion = 12,
+                syncStatus = SyncStatus.SYNCED
+            )
+            val mapped = sampleEntity.copy(
+                id = 0,
+                categoryId = 2,
+                serverVersion = 12,
+                syncStatus = "SYNCED"
+            )
+            coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns sampleCategory
+            every {
+                mapper.toEntity(remote.copy(categoryId = 2))
+            } returns mapped
+            coEvery { transactionDao.mergeRemote(mapped) } returns true
+
+            assertTrue(repository.mergeRemote(remote))
+
+            coVerify { transactionDao.mergeRemote(mapped) }
         }
     }
 }

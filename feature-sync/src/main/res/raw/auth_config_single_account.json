@@ -1,0 +1,14 @@
+{
+  "client_id": "b8f0b1ac-f397-4b36-b0c6-e557da8decac",
+  "authorization_user_agent": "DEFAULT",
+  "redirect_uri": "msauth://com.aibookkeeper/Bz2yzPK9AAoVfZMfgsGXCk3bLSs%3D",
+  "account_mode": "SINGLE",
+  "broker_redirect_uri_registered": false,
+  "multiple_clouds_supported": false,
+  "authorities": [
+    {
+      "type": "CIAM",
+      "authority_url": "https://aibookkeeper.ciamlogin.com/aibookkeeper.onmicrosoft.com/"
+    }
+  ]
+}

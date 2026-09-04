@@ -15,17 +15,21 @@ import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionManager
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -50,6 +54,7 @@ class HomeViewModelTest {
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
     private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
+    private val ledgerContext: LedgerContext = mockk()
 
     private val now = LocalDateTime.now()
     private val currentMonth = YearMonth.now()
@@ -61,6 +66,7 @@ class HomeViewModelTest {
         every { secureConfigStore.getTextPrompt() } returns ""
         every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
         every { systemSpeechRecognitionManager.extractBestResult(any()) } returns null
+        every { ledgerContext.state } returns MutableStateFlow(LedgerContextState())
     }
 
     @AfterEach
@@ -85,7 +91,8 @@ class HomeViewModelTest {
             aiExtractionRepository,
             voiceTranscriptionRepository,
             secureConfigStore,
-            systemSpeechRecognitionManager
+            systemSpeechRecognitionManager,
+            ledgerContext
         )
     }
 
@@ -307,6 +314,32 @@ class HomeViewModelTest {
             assertEquals(TransactionSource.TEXT_AI, savedTransaction.captured.source)
             assertEquals(0.62f, savedTransaction.captured.aiConfidence)
             assertEquals("午饭20", savedTransaction.captured.originalInput)
+        }
+
+        @Test
+        fun should_ignoreRepeatedSubmit_while_processingOrShowingSuccess() = runTest {
+            val category = createCategory(name = "餐饮")
+            val extraction = ExtractionResult(
+                amount = 20.0,
+                type = "EXPENSE",
+                category = "餐饮",
+                date = LocalDate.now().toString(),
+                confidence = 0.9f
+            )
+            coEvery { aiExtractionRepository.extract("午饭20", any()) } returns Result.success(extraction)
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel(categories = listOf(category))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.submitAiInput("午饭20")
+            vm.submitAiInput("午饭20")
+            testDispatcher.scheduler.advanceUntilIdle()
+            vm.submitAiInput("午饭20")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify(exactly = 1) { aiExtractionRepository.extract("午饭20", any()) }
+            coVerify(exactly = 1) { transactionRepository.create(any()) }
         }
     }
 

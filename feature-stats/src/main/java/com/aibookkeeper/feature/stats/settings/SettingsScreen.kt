@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
@@ -56,6 +58,8 @@ import com.aibookkeeper.feature.stats.navigation.StatsRoutes
 fun SettingsScreen(
     navController: NavController,
     onNotificationServiceToggle: (Boolean) -> Unit = {},
+    onCloudSyncClick: () -> Unit = {},
+    onFamilyLedgerClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -196,6 +200,44 @@ fun SettingsScreen(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
 
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "数据",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+
+            SettingsNavigationRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.CloudSync,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "Azure 云同步",
+                subtitle = "邮箱验证码登录、立即同步与同步状态",
+                onClick = onCloudSyncClick
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            SettingsNavigationRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Group,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "账本与家庭管理",
+                subtitle = "切换模式、邀请成员并设置查看或编辑权限",
+                onClick = onFamilyLedgerClick
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             Spacer(modifier = Modifier.height(24.dp))
 
             // ── Azure OpenAI section ─────────────────────────────────

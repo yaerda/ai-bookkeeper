@@ -1,5 +1,6 @@
 package com.aibookkeeper.feature.input.quick
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -44,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -68,6 +70,17 @@ fun QuickInputSheet(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    LaunchedEffect(uiState) {
+        val success = uiState as? QuickInputUiState.Success ?: return@LaunchedEffect
+        Toast.makeText(
+            context,
+            "记账成功 ¥${"%.2f".format(success.amount)} ${success.category}",
+            Toast.LENGTH_SHORT
+        ).show()
+        viewModel.resetAfterSave()
+    }
 
     QuickInputSheetContent(
         uiState = uiState,

@@ -26,7 +26,7 @@ import com.aibookkeeper.core.data.local.entity.TransactionEntity
         RawEventEntity::class,
         PaymentPagePatternEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

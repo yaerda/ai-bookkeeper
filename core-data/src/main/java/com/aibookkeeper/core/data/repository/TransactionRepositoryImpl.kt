@@ -3,6 +3,7 @@ package com.aibookkeeper.core.data.repository
 import com.aibookkeeper.core.common.extensions.endOfMonthMillis
 import com.aibookkeeper.core.common.extensions.startOfMonthMillis
 import com.aibookkeeper.core.common.extensions.toEpochMillis
+import com.aibookkeeper.core.common.extensions.toLocalDateTime
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.dao.TransactionDao
 import com.aibookkeeper.core.data.mapper.TransactionMapper
@@ -23,7 +24,18 @@ class TransactionRepositoryImpl @Inject constructor(
 ) : TransactionRepository {
 
     override suspend fun create(transaction: Transaction): Result<Long> = runCatching {
-        transactionDao.insert(mapper.toEntity(transaction))
+        transactionDao.insert(
+            mapper.toEntity(
+                transaction.copy(
+                    syncStatus = if (transaction.syncStatus == SyncStatus.SYNCED) {
+                        SyncStatus.PENDING_SYNC
+                    } else {
+                        transaction.syncStatus
+                    },
+                    deletedAt = null
+                )
+            )
+        )
     }
 
     override suspend fun getById(id: Long): Transaction? =
@@ -49,13 +61,27 @@ class TransactionRepositoryImpl @Inject constructor(
         transactionDao.observeByDateRange(yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis())
             .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
+    override fun observeTransactionMonths(): Flow<List<TransactionMonthSummary>> =
+        transactionDao.observeActiveTransactionDates().map { dates ->
+            dates.groupingBy { YearMonth.from(it.toLocalDateTime()) }
+                .eachCount()
+                .entries
+                .sortedByDescending { it.key }
+                .map { (month, count) -> TransactionMonthSummary(month, count) }
+        }
+
     override fun observePendingTransactions(): Flow<List<Transaction>> =
         transactionDao.observeByStatus(TransactionStatus.PENDING.name)
             .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
+    override fun observePendingSyncCount(): Flow<Int> =
+        transactionDao.observePendingSyncCount()
+
     override fun observeByCategoryAndMonth(categoryId: Long, yearMonth: YearMonth): Flow<List<Transaction>> =
         transactionDao.observeByCategoryAndDateRange(
-            categoryId, yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis()
+            categoryId.takeIf { it > 0 },
+            yearMonth.startOfMonthMillis(),
+            yearMonth.endOfMonthMillis()
         ).map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     /**
@@ -73,7 +99,17 @@ class TransactionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun update(transaction: Transaction): Result<Unit> = runCatching {
-        transactionDao.update(mapper.toEntity(transaction))
+        transactionDao.updateMonotonic(
+            mapper.toEntity(
+                transaction.copy(
+                    syncStatus = if (transaction.syncStatus == SyncStatus.SYNCED) {
+                        SyncStatus.PENDING_SYNC
+                    } else {
+                        transaction.syncStatus
+                    }
+                )
+            )
+        )
     }
 
     override suspend fun confirmTransaction(id: Long): Result<Unit> = runCatching {
@@ -87,7 +123,7 @@ class TransactionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun delete(id: Long): Result<Unit> = runCatching {
-        transactionDao.deleteById(id)
+        transactionDao.softDeleteById(id, System.currentTimeMillis())
     }
 
     override suspend fun search(keyword: String): List<Transaction> =
@@ -125,6 +161,42 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override suspend fun markSynced(ids: List<Long>) {
         ids.forEach { transactionDao.updateSyncStatus(it, SyncStatus.SYNCED.name) }
+    }
+
+    override suspend fun acknowledgeSynced(
+        syncId: String,
+        expectedUpdatedAt: LocalDateTime,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Boolean = transactionDao.acknowledgeSync(
+        syncId = syncId,
+        expectedUpdatedAt = expectedUpdatedAt.toEpochMillis(),
+        expectedServerVersion = expectedServerVersion,
+        serverVersion = serverVersion
+    ) == 1
+
+    override suspend fun rebasePendingSync(
+        syncId: String,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Boolean = transactionDao.rebasePendingSync(
+        syncId = syncId,
+        expectedServerVersion = expectedServerVersion,
+        serverVersion = serverVersion
+    ) == 1
+
+    override suspend fun mergeRemote(transaction: Transaction): Boolean {
+        val localCategoryId = transaction.categoryName
+            ?.let { categoryDao.findByNameAndType(it, transaction.type.name)?.id }
+        return transactionDao.mergeRemote(
+            mapper.toEntity(
+                transaction.copy(
+                    id = 0,
+                    categoryId = localCategoryId,
+                    syncStatus = SyncStatus.SYNCED
+                )
+            )
+        )
     }
 
     override suspend fun getMonthlyExpense(yearMonth: YearMonth): Double =

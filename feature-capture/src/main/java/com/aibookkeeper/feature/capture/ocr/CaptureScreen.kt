@@ -93,6 +93,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import android.util.Base64
 
+internal fun shouldDefaultToSplit(items: List<ExtractionResult>): Boolean {
+    val types = items.mapTo(mutableSetOf()) { it.type.uppercase() }
+    return "EXPENSE" in types && "INCOME" in types
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CaptureScreen(
@@ -189,13 +194,23 @@ fun CaptureScreen(
     }
 
     fun clearAll() {
+        debounceJob?.cancel()
+        debounceJob = null
+        isProcessing = false
         imageUri = null
         pendingCameraUri = null
         ocrText = ""
         errorMessage = ""
         extractionResult = null
+        visionItems = emptyList()
+        splitTexts = emptyList()
+        isSplitMode = false
         savedMessage = ""
         processingLabel = ""
+        showResultPage = false
+        showFullscreenEditor = false
+        showClearConfirmDialog = false
+        pendingImageAction = null
         cameraImageFile?.delete()
         cameraImageFile = null
     }
@@ -211,10 +226,15 @@ fun CaptureScreen(
     }
 
     val onImageSelected: (Uri) -> Unit = { uri ->
+        debounceJob?.cancel()
+        debounceJob = null
         pendingCameraUri = null
         ocrText = ""
         errorMessage = ""
         extractionResult = null
+        visionItems = emptyList()
+        splitTexts = emptyList()
+        isSplitMode = false
         savedMessage = ""
         processingLabel = ""
         showResultPage = false
@@ -447,6 +467,7 @@ fun CaptureScreen(
             ocrText = detailed.formattedText
             visionItems = detailed.items
             splitTexts = detailed.formattedText.lines().filter { it.isNotBlank() }
+            isSplitMode = shouldDefaultToSplit(detailed.items)
 
             // Step 2: Auto-trigger text extraction for accurate right-box result
             if (detailed.formattedText.isNotBlank()) {
@@ -479,6 +500,7 @@ fun CaptureScreen(
     }
 
     fun confirmAndSave(data: ExtractionResult) {
+        if (isProcessing) return
         isProcessing = true
         processingLabel = "正在保存..."
 
@@ -489,7 +511,12 @@ fun CaptureScreen(
 
             isProcessing = false
             if (txId > 0) {
-                savedMessage = "✅ 记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}"
+                Toast.makeText(
+                    context,
+                    "记账成功 ¥${"%.2f".format(data.amount ?: 0.0)} ${data.category}",
+                    Toast.LENGTH_SHORT
+                ).show()
+                clearAll()
             } else {
                 errorMessage = "保存失败，请重试"
             }
@@ -497,7 +524,7 @@ fun CaptureScreen(
     }
 
     fun confirmAndSaveAll(items: List<ExtractionResult>) {
-        if (items.isEmpty()) return
+        if (items.isEmpty() || isProcessing) return
         isProcessing = true
         processingLabel = "正在保存 ${items.size} 笔..."
 
@@ -511,7 +538,13 @@ fun CaptureScreen(
             }
             isProcessing = false
             if (successCount > 0) {
-                savedMessage = "✅ 已保存 $successCount 笔，共 ¥${"%.2f".format(totalAmount)}"
+                val message = if (successCount == items.size) {
+                    "已保存 $successCount 笔，共 ¥${"%.2f".format(totalAmount)}"
+                } else {
+                    "已保存 $successCount/${items.size} 笔"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                clearAll()
             } else {
                 errorMessage = "保存失败，请重试"
             }

@@ -5,6 +5,9 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
@@ -16,12 +19,17 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Alignment
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -35,12 +43,16 @@ import com.aibookkeeper.feature.input.navigation.inputNavGraph
 import com.aibookkeeper.feature.capture.navigation.captureNavGraph
 import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
+import com.aibookkeeper.feature.sync.ui.SyncScreen
+import com.aibookkeeper.feature.sync.ui.FamilyScreen
 import com.aibookkeeper.onboarding.OnboardingScreen
 import com.aibookkeeper.splash.SplashScreen
 import com.aibookkeeper.update.UpdateCheckEffect
 
 private const val ROUTE_ONBOARDING = "onboarding"
 private const val ROUTE_SPLASH = "splash"
+private const val ROUTE_SYNC = "cloud-sync"
+private const val ROUTE_FAMILY = "family-ledger"
 
 sealed class BottomNavItem(
     val route: String,
@@ -61,7 +73,29 @@ sealed class BottomNavItem(
 }
 
 @Composable
-fun AppNavHost(sharedImageUri: String? = null) {
+fun AppNavHost(
+    sharedImageUri: String? = null,
+    ledgerAccessViewModel: LedgerAccessViewModel = hiltViewModel()
+) {
+    val ledgerAccessState by ledgerAccessViewModel.accessState.collectAsStateWithLifecycle()
+    if (ledgerAccessState is LedgerAccessState.Loading) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    if (ledgerAccessState is LedgerAccessState.AccountMismatch) {
+        AccountMismatchScreen(
+            email = (ledgerAccessState as LedgerAccessState.AccountMismatch).email,
+            onSignOut = ledgerAccessViewModel::signOut
+        )
+        return
+    }
+
     val navController = rememberNavController()
     val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -122,6 +156,7 @@ fun AppNavHost(sharedImageUri: String? = null) {
                         )
                     }
                 }
+
             }
         }
     ) { innerPadding ->
@@ -177,8 +212,18 @@ fun AppNavHost(sharedImageUri: String? = null) {
                     } else {
                         PaymentNotificationService.stop(context)
                     }
-                }
+                },
+                onCloudSyncClick = { navController.navigate(ROUTE_SYNC) },
+                onFamilyLedgerClick = { navController.navigate(ROUTE_FAMILY) }
             )
+            composable(ROUTE_SYNC) {
+                SyncScreen(onBack = { navController.popBackStack() })
+            }
+            composable(ROUTE_FAMILY) {
+                FamilyScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
     }
 }

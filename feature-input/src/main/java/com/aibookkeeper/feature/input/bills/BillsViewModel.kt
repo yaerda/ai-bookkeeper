@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,7 @@ data class BillsUiState(
     val currentMonth: YearMonth = YearMonth.now(),
     val monthExpense: Double = 0.0,
     val monthIncome: Double = 0.0,
+    val availableMonths: List<TransactionMonthSummary> = emptyList(),
     val dayGroups: List<DayGroup> = emptyList(),
     val isLoading: Boolean = true
 )
@@ -47,8 +49,9 @@ class BillsViewModel @Inject constructor(
         combine(
             transactionRepository.observeByMonth(month),
             transactionRepository.observeMonthlyExpense(month),
-            transactionRepository.observeMonthlyIncome(month)
-        ) { transactions, expense, income ->
+            transactionRepository.observeMonthlyIncome(month),
+            transactionRepository.observeTransactionMonths()
+        ) { transactions, expense, income, availableMonths ->
             val today = LocalDate.now()
             val yesterday = today.minusDays(1)
 
@@ -74,6 +77,7 @@ class BillsViewModel @Inject constructor(
                 currentMonth = month,
                 monthExpense = expense,
                 monthIncome = income,
+                availableMonths = availableMonths,
                 dayGroups = grouped,
                 isLoading = false
             )
@@ -90,6 +94,12 @@ class BillsViewModel @Inject constructor(
 
     fun nextMonth() {
         _currentMonth.value = _currentMonth.value.plusMonths(1)
+    }
+
+    fun selectMonth(month: YearMonth) {
+        if (month <= YearMonth.now()) {
+            _currentMonth.value = month
+        }
     }
 
     fun deleteTransaction(id: Long) {

@@ -298,6 +298,24 @@ class TextInputViewModelTest {
         }
 
         @Test
+        fun should_ignoreRepeatedConfirm_while_saveIsStarting() = runTest {
+            val extraction = createExtractionResult()
+            coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
+            coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            vm.confirmSave()
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify(exactly = 1) { transactionRepository.create(any()) }
+        }
+
+        @Test
         fun should_showError_when_saveFails() = runTest {
             val extraction = createExtractionResult()
             coEvery { aiExtractionRepository.extract("午饭35") } returns Result.success(extraction)
@@ -399,6 +417,18 @@ class TextInputViewModelTest {
             val state = vm.uiState.value
             assertTrue(state is TextInputUiState.Success)
             assertEquals(50.0, (state as TextInputUiState.Success).amount)
+        }
+
+        @Test
+        fun should_ignoreRepeatedManualSave_while_saveIsStarting() = runTest {
+            coEvery { transactionRepository.create(any()) } returns Result.success(2L)
+
+            val vm = createViewModel()
+            vm.saveManual(50.0, 1L, "餐饮", "午饭", TransactionType.EXPENSE)
+            vm.saveManual(50.0, 1L, "餐饮", "午饭", TransactionType.EXPENSE)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            coVerify(exactly = 1) { transactionRepository.create(any()) }
         }
 
         @Test

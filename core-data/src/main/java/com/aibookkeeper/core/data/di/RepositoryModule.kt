@@ -24,6 +24,7 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
+    @LocalLedger
     abstract fun bindTransactionRepository(
         impl: TransactionRepositoryImpl
     ): TransactionRepository

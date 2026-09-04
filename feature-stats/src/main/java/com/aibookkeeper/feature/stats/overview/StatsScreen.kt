@@ -1,6 +1,7 @@
 package com.aibookkeeper.feature.stats.overview
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.data.model.CategoryExpense
+import com.aibookkeeper.feature.stats.navigation.StatsRoutes
 import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -127,7 +130,15 @@ fun StatsScreen(
                 ) { categoryExpense ->
                     CategoryBreakdownItem(
                         item = categoryExpense,
-                        totalExpense = uiState.monthExpense
+                        totalExpense = uiState.monthExpense,
+                        onClick = {
+                            navController.navigate(
+                                StatsRoutes.categoryDetail(
+                                    categoryExpense.categoryId,
+                                    uiState.currentMonth
+                                )
+                            )
+                        }
                     )
                 }
             }
@@ -273,13 +284,15 @@ private fun formatCompactAmount(amount: Double): String {
 @Composable
 private fun CategoryBreakdownItem(
     item: CategoryExpense,
-    totalExpense: Double
+    totalExpense: Double,
+    onClick: () -> Unit
 ) {
     val color = parseCategoryColor(item.categoryColor)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -333,6 +346,13 @@ private fun CategoryBreakdownItem(
                 )
             }
         }
+
+        Spacer(modifier = Modifier.width(8.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "查看${item.categoryName}明细",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

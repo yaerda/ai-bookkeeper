@@ -68,11 +68,15 @@ class QuickInputViewModel @Inject constructor(
     val uiState: StateFlow<QuickInputUiState> = _uiState.asStateFlow()
 
     private var lastExtractionResult: ExtractionResult? = null
+    private var preselectedCategory: String? = null
+    private var preselectedCategoryIcon: String? = null
 
     /**
      * Set preselected category (from notification category button).
      */
     fun setPreselectedCategory(name: String?, icon: String?) {
+        preselectedCategory = name
+        preselectedCategoryIcon = icon
         _uiState.value = QuickInputUiState.Idle(
             preselectedCategory = name,
             preselectedCategoryIcon = icon
@@ -114,8 +118,10 @@ class QuickInputViewModel @Inject constructor(
      * Submit a quick-category entry: only amount is needed, category is preselected.
      */
     fun submitCategoryAmount(amount: Double, categoryName: String) {
+        if (_uiState.value !is QuickInputUiState.Idle) return
+        _uiState.value = QuickInputUiState.Saving
+
         viewModelScope.launch {
-            _uiState.value = QuickInputUiState.Saving
             val now = LocalDateTime.now()
             val category = categoryRepository.findByNameAndType(categoryName, TransactionType.EXPENSE)
             val transaction = Transaction(
@@ -153,9 +159,9 @@ class QuickInputViewModel @Inject constructor(
     fun confirmSave() {
         val preview = _uiState.value as? QuickInputUiState.Preview ?: return
         val extraction = lastExtractionResult ?: return
+        _uiState.value = QuickInputUiState.Saving
 
         viewModelScope.launch {
-            _uiState.value = QuickInputUiState.Saving
             val now = LocalDateTime.now()
             val txType = when (extraction.type.uppercase()) {
                 "INCOME" -> TransactionType.INCOME
@@ -211,7 +217,17 @@ class QuickInputViewModel @Inject constructor(
      * Reset to idle state for retry.
      */
     fun resetToIdle() {
+        preselectedCategory = null
+        preselectedCategoryIcon = null
         _uiState.value = QuickInputUiState.Idle()
+        lastExtractionResult = null
+    }
+
+    fun resetAfterSave() {
+        _uiState.value = QuickInputUiState.Idle(
+            preselectedCategory = preselectedCategory,
+            preselectedCategoryIcon = preselectedCategoryIcon
+        )
         lastExtractionResult = null
     }
 }

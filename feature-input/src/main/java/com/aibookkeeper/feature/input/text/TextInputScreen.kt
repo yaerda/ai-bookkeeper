@@ -22,9 +22,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,11 +73,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -107,7 +102,7 @@ import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.home.VoiceInputMode
 import com.aibookkeeper.feature.input.home.VoiceStatus
-import kotlinx.coroutines.withTimeoutOrNull
+import com.aibookkeeper.feature.input.components.holdToTalkGesture
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -120,7 +115,18 @@ fun TextInputScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(uiState) {
+        val success = uiState as? TextInputUiState.Success ?: return@LaunchedEffect
+        Toast.makeText(
+            context,
+            "记账成功 ¥${"%.2f".format(success.amount)} ${success.category}",
+            Toast.LENGTH_SHORT
+        ).show()
+        viewModel.resetToIdle()
+    }
 
     Scaffold(
         modifier = modifier
@@ -1014,13 +1020,6 @@ private fun AiActionButton(
 ) {
     val isProcessing = isSubmitting || voiceStatus is VoiceStatus.Processing
 
-    // Keep references fresh for use inside pointerInput coroutine
-    val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
-    val currentOnSubmit by rememberUpdatedState(onSubmit)
-    val currentIsRecording by rememberUpdatedState(isRecording)
-    val currentIsProcessing by rememberUpdatedState(isProcessing)
-    val currentAiInput by rememberUpdatedState(aiInput)
-
     val buttonColor by animateColorAsState(
         targetValue = when {
             isRecording -> MaterialTheme.colorScheme.error
@@ -1048,29 +1047,13 @@ private fun AiActionButton(
             .background(
                 if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
             )
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    val upBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                        waitForUpOrCancellation()
-                    }
-                    if (upBeforeLongPress != null) {
-                        // Short tap
-                        when {
-                            currentIsRecording -> currentOnVoiceToggle()
-                            currentAiInput.isNotBlank() && !currentIsProcessing -> currentOnSubmit()
-                            else -> {}
-                        }
-                    } else {
-                        // Long press reached — start recording
-                        if (!currentIsProcessing) currentOnVoiceToggle()
-                        // Wait for finger release
-                        waitForUpOrCancellation()
-                        // Release — stop recording
-                        if (currentIsRecording) currentOnVoiceToggle()
-                    }
-                }
-            }
+            .holdToTalkGesture(
+                isRecording = isRecording,
+                isProcessing = isProcessing,
+                hasSubmitContent = aiInput.isNotBlank(),
+                onVoiceToggle = onVoiceToggle,
+                onSubmit = onSubmit
+            )
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {

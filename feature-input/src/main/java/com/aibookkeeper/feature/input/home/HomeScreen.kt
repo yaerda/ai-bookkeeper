@@ -25,9 +25,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,12 +45,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -73,11 +73,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -98,7 +96,7 @@ import com.aibookkeeper.core.common.extensions.toFriendlyDateString
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
-import kotlinx.coroutines.withTimeoutOrNull
+import com.aibookkeeper.feature.input.components.holdToTalkGesture
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -116,6 +114,7 @@ fun HomeScreen(
     var aiInput by remember { mutableStateOf("") }
     var showPromptReview by remember { mutableStateOf(false) }
     var startWithVoice by remember { mutableStateOf(false) }
+    var showLedgerMenu by remember { mutableStateOf(false) }
 
     // Auto-open AI sheet when returning from CaptureScreen
     LaunchedEffect(Unit) {
@@ -147,13 +146,65 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Column {
+                        Box {
+                            Row(
+                                modifier = Modifier.clickable(
+                                    enabled = uiState.isSignedIn
+                                ) { showLedgerMenu = true },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = uiState.selectedLedgerName,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (uiState.isSignedIn) {
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "切换账本"
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = showLedgerMenu,
+                                onDismissRequest = { showLedgerMenu = false }
+                            ) {
+                                uiState.ledgers.forEach { ledger ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(ledger.name)
+                                                if (!ledger.isLocal) {
+                                                    Text(
+                                                        text = when (ledger.role) {
+                                                            "EDITOR" -> "可编辑"
+                                                            "VIEWER" -> "仅查看"
+                                                            else -> ledger.role
+                                                        },
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            showLedgerMenu = false
+                                            viewModel.selectLedger(ledger.id)
+                                        }
+                                    )
+                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("管理家庭账本") },
+                                    onClick = {
+                                        showLedgerMenu = false
+                                        navController.navigate("family-ledger")
+                                    }
+                                )
+                            }
+                        }
                         Text(
-                            text = "AI 智能记账",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = LocalDate.now().toFriendlyDateString(),
+                            text = "AI 智能记账 · ${LocalDate.now().toFriendlyDateString()}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -232,6 +283,16 @@ fun HomeScreen(
                         modifier = Modifier.clickable {
                             navController.navigate("bills")
                         }
+                    )
+                }
+            }
+
+            if (uiState.ledgerErrorMessage != null) {
+                item {
+                    Text(
+                        text = uiState.ledgerErrorMessage.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -778,13 +839,6 @@ private fun AiActionButton(
 ) {
     val isProcessing = aiStatus is AiStatus.Processing || voiceStatus is VoiceStatus.Processing
 
-    // Keep references fresh for use inside pointerInput coroutine
-    val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
-    val currentOnSubmit by rememberUpdatedState(onSubmit)
-    val currentIsRecording by rememberUpdatedState(isRecording)
-    val currentIsProcessing by rememberUpdatedState(isProcessing)
-    val currentAiInput by rememberUpdatedState(aiInput)
-
     val buttonColor by animateColorAsState(
         targetValue = when {
             isRecording -> MaterialTheme.colorScheme.error
@@ -813,29 +867,13 @@ private fun AiActionButton(
             .background(
                 if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
             )
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    val upBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                        waitForUpOrCancellation()
-                    }
-                    if (upBeforeLongPress != null) {
-                        // Short tap
-                        when {
-                            currentIsRecording -> currentOnVoiceToggle()
-                            currentAiInput.isNotBlank() && !currentIsProcessing -> currentOnSubmit()
-                            else -> {}
-                        }
-                    } else {
-                        // Long press reached — start recording
-                        if (!currentIsProcessing) currentOnVoiceToggle()
-                        // Wait for finger release
-                        waitForUpOrCancellation()
-                        // Release — stop recording
-                        if (currentIsRecording) currentOnVoiceToggle()
-                    }
-                }
-            }
+            .holdToTalkGesture(
+                isRecording = isRecording,
+                isProcessing = isProcessing,
+                hasSubmitContent = aiInput.isNotBlank(),
+                onVoiceToggle = onVoiceToggle,
+                onSubmit = onSubmit
+            )
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {

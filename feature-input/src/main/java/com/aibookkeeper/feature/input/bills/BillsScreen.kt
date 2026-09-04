@@ -21,9 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -38,11 +41,14 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +65,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -89,8 +96,10 @@ fun BillsScreen(
             // Month selector
             MonthSelector(
                 currentMonth = uiState.currentMonth,
+                availableMonths = uiState.availableMonths,
                 onPrevious = viewModel::previousMonth,
-                onNext = viewModel::nextMonth
+                onNext = viewModel::nextMonth,
+                onMonthSelected = viewModel::selectMonth
             )
 
             // Monthly summary
@@ -216,9 +225,13 @@ fun BillsScreen(
 @Composable
 private fun MonthSelector(
     currentMonth: YearMonth,
+    availableMonths: List<TransactionMonthSummary>,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onMonthSelected: (YearMonth) -> Unit
 ) {
+    var monthMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -233,12 +246,43 @@ private fun MonthSelector(
             )
         }
 
-        Text(
-            text = "${currentMonth.year}年${currentMonth.monthValue}月",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
+        Box {
+            TextButton(
+                onClick = { monthMenuExpanded = true },
+                enabled = availableMonths.isNotEmpty()
+            ) {
+                Text(
+                    text = "${currentMonth.year}年${currentMonth.monthValue}月",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                if (availableMonths.isNotEmpty()) {
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = "选择有账单的月份"
+                    )
+                }
+            }
+            DropdownMenu(
+                expanded = monthMenuExpanded,
+                onDismissRequest = { monthMenuExpanded = false }
+            ) {
+                availableMonths.forEach { summary ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "${summary.month.year}年${summary.month.monthValue}月 · " +
+                                    "${summary.count}笔"
+                            )
+                        },
+                        onClick = {
+                            monthMenuExpanded = false
+                            onMonthSelected(summary.month)
+                        }
+                    )
+                }
+            }
+        }
 
         val isCurrentMonth = currentMonth == YearMonth.now()
         IconButton(onClick = onNext, enabled = !isCurrentMonth) {

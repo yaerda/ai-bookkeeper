@@ -13,6 +13,8 @@ import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerOption
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
@@ -49,7 +51,13 @@ data class HomeUiState(
     val cloudSystemPrompt: String = "",
     val customCloudPrompt: String = "",
     val aiStatus: AiStatus = AiStatus.Idle,
-    val voiceStatus: VoiceStatus = VoiceStatus.Idle
+    val voiceStatus: VoiceStatus = VoiceStatus.Idle,
+    val isSignedIn: Boolean = false,
+    val ledgers: List<LedgerOption> = emptyList(),
+    val selectedLedgerId: String = "",
+    val selectedLedgerName: String = "个人账本",
+    val canEditSelectedLedger: Boolean = true,
+    val ledgerErrorMessage: String? = null
 )
 
 sealed class AiStatus {
@@ -79,7 +87,8 @@ class HomeViewModel @Inject constructor(
     private val aiExtractionRepository: AiExtractionRepository,
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository,
     private val secureConfigStore: SecureConfigStore,
-    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager
+    private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager,
+    private val ledgerContext: LedgerContext
 ) : ViewModel() {
 
     private val _aiStatus = MutableStateFlow<AiStatus>(AiStatus.Idle)
@@ -99,8 +108,9 @@ class HomeViewModel @Inject constructor(
         },
         _aiStatus,
         _voiceStatus,
-        _customCloudPrompt
-    ) { data, aiStatus, voiceStatus, customCloudPrompt ->
+        _customCloudPrompt,
+        ledgerContext.state
+    ) { data, aiStatus, voiceStatus, customCloudPrompt, ledgerState ->
 
         val today = LocalDate.now()
         val todayTransactions = data.transactions.filter { it.date.toLocalDate() == today }
@@ -119,11 +129,17 @@ class HomeViewModel @Inject constructor(
             recentTransactions = data.transactions.take(20),
             expenseCategories = data.categories,
             currentMonth = currentMonth,
-            isLoading = false,
+            isLoading = ledgerState.isLoading,
             cloudSystemPrompt = AzureOpenAiPromptBuilder.buildBaseSystemPrompt(data.categories.map { it.name }),
             customCloudPrompt = customCloudPrompt,
             aiStatus = aiStatus,
-            voiceStatus = voiceStatus
+            voiceStatus = voiceStatus,
+            isSignedIn = ledgerState.isSignedIn,
+            ledgers = ledgerState.ledgers,
+            selectedLedgerId = ledgerState.selectedLedgerId,
+            selectedLedgerName = ledgerState.selectedLedger.name,
+            canEditSelectedLedger = ledgerState.selectedLedger.canEdit,
+            ledgerErrorMessage = ledgerState.errorMessage
         )
     }.stateIn(
         scope = viewModelScope,
@@ -131,9 +147,15 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeUiState()
     )
 
+    fun selectLedger(ledgerId: String) {
+        ledgerContext.selectLedger(ledgerId)
+    }
+
     fun submitAiInput(text: String) {
+        if (_aiStatus.value is AiStatus.Processing || _aiStatus.value is AiStatus.Success) return
+        _aiStatus.value = AiStatus.Processing
+
         viewModelScope.launch {
-            _aiStatus.value = AiStatus.Processing
             try {
                 val categories = categoryRepository.observeExpenseCategories().stateIn(viewModelScope).value
                 val categoryNames = categories.map { it.name }

@@ -14,6 +14,7 @@ import androidx.room.PrimaryKey
         Index(value = ["type"]),
         Index(value = ["status"]),
         Index(value = ["syncStatus"]),
+        Index(value = ["syncId"], unique = true),
         Index(value = ["date", "type"])
     ],
     foreignKeys = [
@@ -69,5 +70,14 @@ data class TransactionEntity(
     val aiConfidence: Float? = null,
 
     @ColumnInfo(name = "aiRawResponse")
-    val aiRawResponse: String? = null
+    val aiRawResponse: String? = null,
+
+    @ColumnInfo(name = "syncId", defaultValue = "''")
+    val syncId: String = java.util.UUID.randomUUID().toString(),
+
+    @ColumnInfo(name = "serverVersion", defaultValue = "0")
+    val serverVersion: Long = 0,
+
+    @ColumnInfo(name = "deletedAt")
+    val deletedAt: Long? = null
 )

@@ -26,7 +26,10 @@ class TransactionMapper @Inject constructor() {
         source = TransactionSource.valueOf(entity.source),
         status = TransactionStatus.valueOf(entity.status),
         syncStatus = SyncStatus.valueOf(entity.syncStatus),
-        aiConfidence = entity.aiConfidence
+        aiConfidence = entity.aiConfidence,
+        syncId = entity.syncId,
+        serverVersion = entity.serverVersion,
+        deletedAt = entity.deletedAt?.toLocalDateTime()
     )
 
     fun toEntity(domain: Transaction): TransactionEntity = TransactionEntity(
@@ -43,6 +46,9 @@ class TransactionMapper @Inject constructor() {
         source = domain.source.name,
         status = domain.status.name,
         syncStatus = domain.syncStatus.name,
-        aiConfidence = domain.aiConfidence
+        aiConfidence = domain.aiConfidence,
+        syncId = domain.syncId,
+        serverVersion = domain.serverVersion,
+        deletedAt = domain.deletedAt?.toEpochMillis()
     )
 }

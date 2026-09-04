@@ -6,13 +6,21 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.aibookkeeper.feature.capture.screenshot.ShareImageReceiverActivity
+import com.aibookkeeper.feature.sync.auth.AuthManager
+import com.aibookkeeper.feature.sync.queue.SyncScheduler
 import dagger.hilt.android.HiltAndroidApp
+import javax.inject.Inject
 
 @HiltAndroidApp
 class AiBookkeeperApp : Application() {
 
+    @Inject lateinit var authManager: AuthManager
+    @Inject lateinit var syncScheduler: SyncScheduler
+
     override fun onCreate() {
         super.onCreate()
+        authManager.initialize()
+        syncScheduler.start()
         publishShareShortcut()
     }
 

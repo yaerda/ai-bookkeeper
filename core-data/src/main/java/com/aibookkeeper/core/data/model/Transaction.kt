@@ -19,5 +19,8 @@ data class Transaction(
     val source: TransactionSource,
     val status: TransactionStatus,
     val syncStatus: SyncStatus,
-    val aiConfidence: Float? = null
+    val aiConfidence: Float? = null,
+    val syncId: String = java.util.UUID.randomUUID().toString(),
+    val serverVersion: Long = 0,
+    val deletedAt: LocalDateTime? = null
 )

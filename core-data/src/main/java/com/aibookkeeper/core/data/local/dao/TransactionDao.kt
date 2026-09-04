@@ -1,7 +1,6 @@
 package com.aibookkeeper.core.data.local.dao
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -25,7 +24,29 @@ interface TransactionDao {
     @Update
     suspend fun update(transaction: TransactionEntity)
 
-    @Query("UPDATE transactions SET status = :status, updatedAt = :updatedAt WHERE id = :id")
+    @androidx.room.Transaction
+    suspend fun updateMonotonic(transaction: TransactionEntity) {
+        val current = getBySyncId(transaction.syncId)
+        update(
+            transaction.copy(
+                updatedAt = maxOf(
+                    transaction.updatedAt,
+                    (current?.updatedAt ?: Long.MIN_VALUE) + 1
+                )
+            )
+        )
+    }
+
+    @Query("""
+        UPDATE transactions
+        SET status = :status,
+            updatedAt = CASE
+                WHEN :updatedAt > updatedAt THEN :updatedAt
+                ELSE updatedAt + 1
+            END,
+            syncStatus = 'PENDING_SYNC'
+        WHERE id = :id
+    """)
     suspend fun updateStatus(id: Long, status: String, updatedAt: Long)
 
     @Query("UPDATE transactions SET syncStatus = :syncStatus WHERE id = :id")
@@ -33,32 +54,41 @@ interface TransactionDao {
 
     // === Delete ===
 
-    @Delete
-    suspend fun delete(transaction: TransactionEntity)
-
-    @Query("DELETE FROM transactions WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("""
+        UPDATE transactions
+        SET deletedAt = CASE
+                WHEN :deletedAt > updatedAt THEN :deletedAt
+                ELSE updatedAt + 1
+            END,
+            updatedAt = CASE
+                WHEN :deletedAt > updatedAt THEN :deletedAt
+                ELSE updatedAt + 1
+            END,
+            syncStatus = 'PENDING_SYNC'
+        WHERE id = :id
+    """)
+    suspend fun softDeleteById(id: Long, deletedAt: Long)
 
     // === Query - Single ===
 
-    @Query("SELECT * FROM transactions WHERE id = :id")
+    @Query("SELECT * FROM transactions WHERE id = :id AND deletedAt IS NULL")
     suspend fun getById(id: Long): TransactionEntity?
 
-    @Query("SELECT * FROM transactions WHERE id = :id")
+    @Query("SELECT * FROM transactions WHERE id = :id AND deletedAt IS NULL")
     fun observeById(id: Long): Flow<TransactionEntity?>
 
     // === Query - List (reactive) ===
 
     @Query("""
-        SELECT * FROM transactions 
-        WHERE date BETWEEN :startMillis AND :endMillis 
+        SELECT * FROM transactions
+        WHERE deletedAt IS NULL AND date BETWEEN :startMillis AND :endMillis
         ORDER BY date DESC
     """)
     fun observeByDateRange(startMillis: Long, endMillis: Long): Flow<List<TransactionEntity>>
 
     @Query("""
-        SELECT * FROM transactions 
-        WHERE date BETWEEN :startMillis AND :endMillis AND type = :type
+        SELECT * FROM transactions
+        WHERE deletedAt IS NULL AND date BETWEEN :startMillis AND :endMillis AND type = :type
         ORDER BY date DESC
     """)
     fun observeByDateRangeAndType(
@@ -66,41 +96,56 @@ interface TransactionDao {
     ): Flow<List<TransactionEntity>>
 
     @Query("""
-        SELECT * FROM transactions 
-        WHERE status = :status 
+        SELECT * FROM transactions
+        WHERE deletedAt IS NULL AND status = :status
         ORDER BY createdAt DESC
     """)
     fun observeByStatus(status: String): Flow<List<TransactionEntity>>
 
     @Query("""
-        SELECT * FROM transactions 
-        WHERE categoryId = :categoryId AND date BETWEEN :startMillis AND :endMillis
+        SELECT date FROM transactions
+        WHERE deletedAt IS NULL
+        ORDER BY date DESC
+    """)
+    fun observeActiveTransactionDates(): Flow<List<Long>>
+
+    @Query("""
+        SELECT * FROM transactions
+        WHERE deletedAt IS NULL
+          AND (
+            categoryId = :categoryId
+            OR (:categoryId IS NULL AND categoryId IS NULL)
+          )
+          AND date BETWEEN :startMillis AND :endMillis
         ORDER BY date DESC
     """)
     fun observeByCategoryAndDateRange(
-        categoryId: Long, startMillis: Long, endMillis: Long
+        categoryId: Long?, startMillis: Long, endMillis: Long
     ): Flow<List<TransactionEntity>>
 
     // === Aggregate queries ===
 
     @Query("""
-        SELECT COALESCE(SUM(amount), 0.0) FROM transactions 
-        WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
+        SELECT COALESCE(SUM(amount), 0.0) FROM transactions
+        WHERE deletedAt IS NULL AND type = :type
+          AND date BETWEEN :startMillis AND :endMillis
     """)
     suspend fun sumByTypeAndDateRange(type: String, startMillis: Long, endMillis: Long): Double
 
     @Query("""
-        SELECT COALESCE(SUM(amount), 0.0) FROM transactions 
-        WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
+        SELECT COALESCE(SUM(amount), 0.0) FROM transactions
+        WHERE deletedAt IS NULL AND type = :type
+          AND date BETWEEN :startMillis AND :endMillis
     """)
     fun observeSumByTypeAndDateRange(
         type: String, startMillis: Long, endMillis: Long
     ): Flow<Double>
 
     @Query("""
-        SELECT categoryId, SUM(amount) as total 
-        FROM transactions 
-        WHERE type = 'EXPENSE' AND date BETWEEN :startMillis AND :endMillis
+        SELECT categoryId, SUM(amount) as total
+        FROM transactions
+        WHERE deletedAt IS NULL AND type = 'EXPENSE'
+          AND date BETWEEN :startMillis AND :endMillis
         GROUP BY categoryId
         ORDER BY total DESC
     """)
@@ -109,17 +154,18 @@ interface TransactionDao {
     ): Flow<List<CategorySum>>
 
     @Query("""
-        SELECT COUNT(*) FROM transactions 
-        WHERE date BETWEEN :startMillis AND :endMillis
+        SELECT COUNT(*) FROM transactions
+        WHERE deletedAt IS NULL AND date BETWEEN :startMillis AND :endMillis
     """)
     suspend fun countByDateRange(startMillis: Long, endMillis: Long): Int
 
     // === Trends ===
 
     @Query("""
-        SELECT categoryId, SUM(amount) as total 
-        FROM transactions 
-        WHERE type = :type AND date BETWEEN :startMillis AND :endMillis
+        SELECT categoryId, SUM(amount) as total
+        FROM transactions
+        WHERE deletedAt IS NULL AND type = :type
+          AND date BETWEEN :startMillis AND :endMillis
         GROUP BY categoryId
         ORDER BY total DESC
     """)
@@ -127,18 +173,67 @@ interface TransactionDao {
 
     // === Sync ===
 
-    @Query("SELECT * FROM transactions WHERE syncStatus = 'PENDING_SYNC' ORDER BY updatedAt ASC")
+    @Query("SELECT * FROM transactions WHERE syncStatus != 'SYNCED' ORDER BY updatedAt ASC")
     suspend fun getPendingSyncTransactions(): List<TransactionEntity>
 
-    @Query("SELECT COUNT(*) FROM transactions WHERE syncStatus = 'PENDING_SYNC'")
+    @Query("SELECT COUNT(*) FROM transactions WHERE syncStatus != 'SYNCED'")
     fun observePendingSyncCount(): Flow<Int>
+
+    @Query("SELECT * FROM transactions WHERE syncId = :syncId LIMIT 1")
+    suspend fun getBySyncId(syncId: String): TransactionEntity?
+
+    @Query("""
+        UPDATE transactions
+        SET serverVersion = :serverVersion,
+            syncStatus = CASE
+                WHEN updatedAt = :expectedUpdatedAt THEN 'SYNCED'
+                ELSE syncStatus
+            END
+        WHERE syncId = :syncId
+          AND serverVersion = :expectedServerVersion
+    """)
+    suspend fun acknowledgeSync(
+        syncId: String,
+        expectedUpdatedAt: Long,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Int
+
+    @Query("""
+        UPDATE transactions
+        SET serverVersion = :serverVersion
+        WHERE syncId = :syncId
+          AND serverVersion = :expectedServerVersion
+          AND syncStatus != 'SYNCED'
+    """)
+    suspend fun rebasePendingSync(
+        syncId: String,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Int
+
+    @androidx.room.Transaction
+    suspend fun mergeRemote(transaction: TransactionEntity): Boolean {
+        val existing = getBySyncId(transaction.syncId)
+        if (existing != null && existing.syncStatus != "SYNCED") {
+            return false
+        }
+        insert(
+            transaction.copy(
+                id = existing?.id ?: 0,
+                syncStatus = "SYNCED"
+            )
+        )
+        return true
+    }
 
     // === Search ===
 
     @Query("""
-        SELECT * FROM transactions 
-        WHERE note LIKE '%' || :keyword || '%' 
-           OR merchantName LIKE '%' || :keyword || '%'
+        SELECT * FROM transactions
+        WHERE deletedAt IS NULL
+          AND (note LIKE '%' || :keyword || '%'
+           OR merchantName LIKE '%' || :keyword || '%')
         ORDER BY date DESC
         LIMIT :limit
     """)

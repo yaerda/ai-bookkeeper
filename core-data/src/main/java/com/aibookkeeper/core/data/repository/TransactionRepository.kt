@@ -6,6 +6,11 @@ import kotlinx.coroutines.flow.Flow
 import java.time.LocalDateTime
 import java.time.YearMonth
 
+data class TransactionMonthSummary(
+    val month: YearMonth,
+    val count: Int
+)
+
 interface TransactionRepository {
 
     suspend fun create(transaction: Transaction): Result<Long>
@@ -18,7 +23,11 @@ interface TransactionRepository {
 
     fun observeByMonth(yearMonth: YearMonth): Flow<List<Transaction>>
 
+    fun observeTransactionMonths(): Flow<List<TransactionMonthSummary>>
+
     fun observePendingTransactions(): Flow<List<Transaction>>
+
+    fun observePendingSyncCount(): Flow<Int>
 
     fun observeByCategoryAndMonth(categoryId: Long, yearMonth: YearMonth): Flow<List<Transaction>>
 
@@ -41,6 +50,21 @@ interface TransactionRepository {
     suspend fun getPendingSync(): List<Transaction>
 
     suspend fun markSynced(ids: List<Long>)
+
+    suspend fun acknowledgeSynced(
+        syncId: String,
+        expectedUpdatedAt: LocalDateTime,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Boolean
+
+    suspend fun rebasePendingSync(
+        syncId: String,
+        expectedServerVersion: Long,
+        serverVersion: Long
+    ): Boolean
+
+    suspend fun mergeRemote(transaction: Transaction): Boolean
 
     suspend fun getMonthlyExpense(yearMonth: YearMonth): Double
 

@@ -1,7 +1,12 @@
 package com.aibookkeeper.update
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -17,10 +22,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.aibookkeeper.BuildConfig
 import com.aibookkeeper.core.common.changelog.CHANGELOG
 import com.aibookkeeper.core.data.security.SecureConfigStore
@@ -30,6 +37,12 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -48,6 +61,21 @@ fun UpdateCheckEffect() {
     }
     var releaseInfo by remember { mutableStateOf<ReleaseInfo?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    var downloadedApk by remember { mutableStateOf<File?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadError by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val apk = downloadedApk
+        if (apk != null && canInstallPackages(context)) {
+            launchPackageInstaller(context, apk)
+            showDialog = false
+        } else {
+            downloadError = "需要允许安装未知应用，授权后请再次点击安装"
+        }
+    }
 
     LaunchedEffect(configStore) {
         val info = UpdateChecker.checkForUpdate(BuildConfig.VERSION_NAME) ?: return@LaunchedEffect
@@ -84,16 +112,37 @@ fun UpdateCheckEffect() {
                     } else {
                         Text("新版本已发布，建议更新以获得最新功能和修复。")
                     }
+                    if (downloadError.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(downloadError, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
                 Button(
+                    enabled = !isDownloading,
                     onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.htmlUrl)))
-                        showDialog = false
+                        val existingApk = downloadedApk
+                        if (existingApk != null && existingApk.exists()) {
+                            requestInstall(context, existingApk) { installPermissionLauncher.launch(it) }
+                        } else {
+                            downloadError = ""
+                            isDownloading = true
+                            scope.launch {
+                                try {
+                                    val apk = downloadApk(context, info)
+                                    downloadedApk = apk
+                                    requestInstall(context, apk) { installPermissionLauncher.launch(it) }
+                                } catch (exception: Exception) {
+                                    downloadError = exception.message ?: "更新包下载失败，请稍后重试"
+                                } finally {
+                                    isDownloading = false
+                                }
+                            }
+                        }
                     }
                 ) {
-                    Text("去更新")
+                    Text(if (isDownloading) "下载中…" else if (downloadedApk != null) "安装更新" else "下载并安装")
                 }
             },
             dismissButton = {
@@ -108,4 +157,64 @@ fun UpdateCheckEffect() {
             }
         )
     }
+}
+
+private suspend fun downloadApk(context: Context, info: ReleaseInfo): File =
+    withContext(Dispatchers.IO) {
+        val target = File(context.cacheDir, "ai-bookkeeper-${info.version}.apk")
+        val temporary = File(context.cacheDir, "${target.name}.download")
+        val connection = (URL(info.downloadUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }
+        try {
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException("更新包下载失败（HTTP ${connection.responseCode}）")
+            }
+            connection.inputStream.use { input ->
+                temporary.outputStream().use { output -> input.copyTo(output) }
+            }
+            check(temporary.length() > 0) { "下载的更新包为空" }
+            if (target.exists() && !target.delete()) {
+                throw IllegalStateException("无法替换旧的更新包")
+            }
+            check(temporary.renameTo(target)) { "无法保存更新包" }
+            target
+        } finally {
+            connection.disconnect()
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
+private fun canInstallPackages(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+        context.packageManager.canRequestPackageInstalls()
+
+private fun requestInstall(
+    context: Context,
+    apk: File,
+    requestPermission: (Intent) -> Unit
+) {
+    if (canInstallPackages(context)) {
+        launchPackageInstaller(context, apk)
+    } else {
+        requestPermission(
+            Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    }
+}
+
+private fun launchPackageInstaller(context: Context, apk: File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+    context.startActivity(
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    )
 }

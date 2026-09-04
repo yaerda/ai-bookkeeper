@@ -27,7 +27,33 @@ object Migrations {
         }
     }
 
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN syncId TEXT NOT NULL DEFAULT ''")
+            db.execSQL(
+                """
+                UPDATE transactions
+                SET syncId = lower(
+                    hex(randomblob(4)) || '-' ||
+                    hex(randomblob(2)) || '-' ||
+                    '4' || substr(hex(randomblob(2)), 2, 3) || '-' ||
+                    substr('89ab', 1 + abs(random() % 4), 1) ||
+                    substr(hex(randomblob(2)), 2, 3) || '-' ||
+                    hex(randomblob(6))
+                )
+                WHERE syncId = ''
+                """.trimIndent()
+            )
+            db.execSQL("ALTER TABLE transactions ADD COLUMN serverVersion INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE transactions ADD COLUMN deletedAt INTEGER")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_transactions_syncId ON transactions (syncId)"
+            )
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_1_2
+        MIGRATION_1_2,
+        MIGRATION_3_4
     )
 }

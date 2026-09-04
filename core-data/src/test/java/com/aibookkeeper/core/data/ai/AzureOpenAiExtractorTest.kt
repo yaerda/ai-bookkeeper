@@ -263,6 +263,60 @@ class AzureOpenAiExtractorTest {
         assertTrue(systemContent.contains("优先把空心菜归到食材，备注保留品牌"))
     }
 
+    @Test
+    fun should_normalizeNegativeExpenseAmount_when_textExtractionReturnsSignedAmount() = runTest {
+        extractor = createExtractor()
+        val aiJson = """{"amount":-26,"type":"EXPENSE","category":"餐饮","confidence":0.9}"""
+
+        coEvery {
+            service.chatCompletions(any(), any(), any())
+        } returns buildResponse(aiJson)
+
+        val data = extractor.extract("午饭 -26").getOrThrow()
+
+        assertEquals(26.0, data.amount)
+        assertEquals("EXPENSE", data.type)
+    }
+
+    @Test
+    fun should_normalizeDetailedVisionItems_when_imageExtractionReturnsSignedItems() = runTest {
+        extractor = createExtractor()
+        val aiJson = """
+            {
+              "formatted_text":"午餐 -¥26\n退款 +¥50",
+              "amount":-76,
+              "type":"EXPENSE",
+              "category":"其他",
+              "merchant_name":"测试商家",
+              "date":"$todayStr",
+              "note":"混合账单",
+              "confidence":0.93,
+              "items":[
+                {"amount":-26,"type":"EXPENSE","category":"餐饮","note":"午餐","confidence":0.91},
+                {"amount":50,"type":"INCOME","category":"工资","note":"退款","confidence":0.92}
+              ]
+            }
+        """.trimIndent()
+
+        coEvery {
+            service.visionChatCompletions(any(), any(), any())
+        } returns buildResponse(aiJson)
+
+        val result = extractor.extractFromImageDetailed(
+            imageBase64 = "base64-image",
+            mimeType = "image/jpeg",
+            categoryNames = listOf("餐饮", "工资", "其他")
+        )
+
+        assertTrue(result.isSuccess)
+        val data = result.getOrThrow()
+        assertEquals(76.0, data.summary.amount)
+        assertEquals(26.0, data.items[0].amount)
+        assertEquals("EXPENSE", data.items[0].type)
+        assertEquals(50.0, data.items[1].amount)
+        assertEquals("INCOME", data.items[1].type)
+    }
+
     // ── Error cases ──
 
     @Test

@@ -104,9 +104,9 @@ class TextInputViewModel @Inject constructor(
     fun confirmSave() {
         val preview = _uiState.value as? TextInputUiState.Preview ?: return
         val extraction = lastExtractionResult ?: return
+        _uiState.value = TextInputUiState.Saving
 
         viewModelScope.launch {
-            _uiState.value = TextInputUiState.Saving
             val now = LocalDateTime.now()
             val txType = when (extraction.type.uppercase()) {
                 "INCOME" -> TransactionType.INCOME
@@ -159,8 +159,10 @@ class TextInputViewModel @Inject constructor(
     }
 
     fun saveManual(amount: Double, categoryId: Long?, categoryName: String, note: String?, type: TransactionType) {
+        if (_uiState.value !is TextInputUiState.Idle) return
+        _uiState.value = TextInputUiState.Saving
+
         viewModelScope.launch {
-            _uiState.value = TextInputUiState.Saving
             val now = LocalDateTime.now()
             val transaction = Transaction(
                 amount = amount,
