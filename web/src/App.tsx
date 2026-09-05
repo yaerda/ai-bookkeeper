@@ -2,7 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { AccountInfo } from '@azure/msal-browser'
 import { apiConfig, configError } from './config'
 import { getAccessToken, login, logout, msalInstance } from './auth'
-import { BookkeeperApi } from './api'
+import { ApiError, BookkeeperApi } from './api'
+import { categoriesForType, categoryIcon, mergeCategories, transactionCategoryFields } from './categories'
+import { CategoryForm, CategoryManager } from './CategoryManager'
+import { compareTransactionChronology, localDateValue, transactionDateMillis } from './dates'
 import {
   calculateMonthlyExpenses,
   calculateMonthlyTrend,
@@ -12,24 +15,19 @@ import {
   groupTransactionsByDate,
 } from './calculations'
 import { canEditLedger, canManageMembers, getSyncLedgerId } from './permissions'
-import {
-  createPasscode,
-  DEFAULT_PRIVACY_SETTINGS,
-  loadPrivacySettings,
-  savePrivacySettings,
-  validatePasscode,
-  verifyPasscode,
-} from './privacy'
-import type { PrivacySettings } from './privacy'
+import { loadAccountPrivacy, privacyErrorMessage, validatePasscode } from './privacy'
+import type { PrivacySettings, PrivacySettingsUpdate } from './privacy'
 import {
   loadDisplayName,
   saveDisplayName,
   validateDisplayName,
 } from './profile'
 import type {
+  CategoryDraft,
   FamilyInvitation,
   FamilyLedger,
   FamilyMember,
+  LedgerCategory,
   LedgerRole,
   Transaction,
   TransactionDraft,
@@ -40,39 +38,6 @@ const currency = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: '
 const dateTitle = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })
 const GITHUB_URL = 'https://github.com/yaerda/ai-bookkeeper'
 const ANDROID_DOWNLOAD_URL = `${GITHUB_URL}/releases/latest/download/ai-bookkeeper-latest.apk`
-const DEFAULT_CATEGORIES = {
-  EXPENSE: ['餐饮', '交通', '购物', '居住', '娱乐', '医疗', '其他'],
-  INCOME: ['工资', '奖金', '理财', '兼职', '其他收入'],
-}
-const CATEGORY_ICONS: Record<string, string> = {
-  ic_food: '🍚',
-  ic_transport: '🚗',
-  ic_shopping: '🛒',
-  ic_entertainment: '🎮',
-  ic_housing: '🏠',
-  ic_medical: '💊',
-  ic_education: '📚',
-  ic_communication: '📱',
-  ic_clothing: '👔',
-  ic_other: '📦',
-  ic_salary: '💰',
-  ic_bonus: '🎁',
-  ic_parttime: '💼',
-  ic_investment: '📈',
-  ic_redpacket: '🧧',
-  ic_other_income: '💵',
-  ic_fruit: '🍎',
-  ic_drink: '🥤',
-  ic_pet: '🐱',
-  ic_travel: '✈️',
-  ic_sport: '⚽',
-  ic_beauty: '💄',
-  ic_baby: '🍼',
-  ic_digital: '💻',
-  ic_gift: '🎀',
-  ic_repair: '🔧',
-  tag: '🏷️',
-}
 
 function monthValue(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -89,13 +54,10 @@ function monthLabel(month: string) {
 }
 
 function categorySymbol(transaction: Transaction) {
-  const icon = transaction.categoryIcon?.trim()
-  if (icon && CATEGORY_ICONS[icon]) return CATEGORY_ICONS[icon]
-  if (icon && !icon.startsWith('ic_')) return icon
-  return transaction.categoryName?.trim().slice(0, 1) || (transaction.type === 'INCOME' ? '收' : '支')
+  return categoryIcon(transaction.categoryIcon, transaction.categoryName)
 }
 
-function makeDraft(transaction?: Transaction): TransactionDraft {
+function makeDraft(transaction: Transaction | undefined, categories: LedgerCategory[]): TransactionDraft {
   const now = Date.now()
   return transaction
     ? {
@@ -106,15 +68,15 @@ function makeDraft(transaction?: Transaction): TransactionDraft {
         categoryName: transaction.categoryName ?? '',
         merchantName: transaction.merchantName ?? '',
         note: transaction.note ?? '',
-        date: new Date(transaction.date).toISOString().slice(0, 10),
+        date: localDateValue(new Date(transaction.date)),
       }
     : {
         amount: 0,
         type: 'EXPENSE',
-        categoryName: '餐饮',
+        categoryName: categoriesForType(categories, 'EXPENSE')[0]?.name ?? '',
         merchantName: '',
         note: '',
-        date: new Date(now).toISOString().slice(0, 10),
+        date: localDateValue(new Date(now)),
       }
 }
 
@@ -160,33 +122,41 @@ function LoginScreen({ error }: { error?: string }) {
 }
 
 function PasscodePrompt({
-  settings,
+  onVerify,
   title,
   description,
   onSuccess,
   onCancel,
   onLogout,
 }: {
-  settings: PrivacySettings
+  onVerify: (passcode: string) => Promise<void>
   title: string
   description: string
-  onSuccess: () => void
+  onSuccess?: () => void
   onCancel?: () => void
   onLogout?: () => void
 }) {
   const [passcode, setPasscode] = useState('')
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(false)
+  const active = useRef(true)
+
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false }
+  }, [])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setChecking(true)
     setError('')
     try {
-      if (await verifyPasscode(passcode, settings)) onSuccess()
-      else setError('口令不正确')
+      await onVerify(passcode)
+      if (active.current) onSuccess?.()
+    } catch (reason) {
+      if (active.current) setError(privacyErrorMessage(reason))
     } finally {
-      setChecking(false)
+      if (active.current) setChecking(false)
     }
   }
 
@@ -217,9 +187,9 @@ function PrivacySettingsModal({
 }: {
   settings: PrivacySettings
   onClose: () => void
-  onSave: (settings: PrivacySettings) => void
+  onSave: (settings: PrivacySettingsUpdate) => Promise<void>
 }) {
-  const hasPasscode = Boolean(settings.passcodeHash)
+  const hasPasscode = settings.hasPasscode
   const [currentPasscode, setCurrentPasscode] = useState('')
   const [newPasscode, setNewPasscode] = useState('')
   const [confirmation, setConfirmation] = useState('')
@@ -233,10 +203,6 @@ function PrivacySettingsModal({
     setSaving(true)
     setError('')
     try {
-      if (hasPasscode && !(await verifyPasscode(currentPasscode, settings))) {
-        setError('当前口令不正确')
-        return
-      }
       const passcode = hasPasscode && !newPasscode ? null : newPasscode
       if (passcode !== null) {
         if (!validatePasscode(passcode)) {
@@ -248,11 +214,16 @@ function PrivacySettingsModal({
           return
         }
       }
-      const credentials = passcode === null
-        ? { passcodeHash: settings.passcodeHash, salt: settings.salt }
-        : await createPasscode(passcode)
-      onSave({ ...credentials, requireOnLogin, requireForIncome })
+      await onSave({
+        version: settings.version,
+        ...(hasPasscode ? { currentPasscode } : {}),
+        ...(passcode === null ? {} : { newPasscode: passcode }),
+        requireOnLogin,
+        requireForIncome,
+      })
       onClose()
+    } catch (reason) {
+      setError(privacyErrorMessage(reason))
     } finally {
       setSaving(false)
     }
@@ -262,31 +233,35 @@ function PrivacySettingsModal({
     setSaving(true)
     setError('')
     try {
-      if (!(await verifyPasscode(currentPasscode, settings))) {
-        setError('当前口令不正确')
-        return
-      }
-      onSave(DEFAULT_PRIVACY_SETTINGS)
+      await onSave({
+        version: settings.version,
+        currentPasscode,
+        clearPasscode: true,
+        requireOnLogin: false,
+        requireForIncome: false,
+      })
       onClose()
+    } catch (reason) {
+      setError(privacyErrorMessage(reason))
     } finally {
       setSaving(false)
     }
   }
 
-  return <div className="modal-backdrop" onMouseDown={onClose}>
+  return <div className="modal-backdrop" onMouseDown={saving ? undefined : onClose}>
     <section className="modal privacy-settings-modal" role="dialog" aria-modal="true" aria-labelledby="privacy-settings-title" onMouseDown={(event) => event.stopPropagation()}>
-      <div className="modal-header"><div><p className="eyebrow">本机隐私</p><h2 id="privacy-settings-title">隐私口令</h2></div><button className="icon-button" aria-label="关闭" onClick={onClose}>×</button></div>
-      <p className="privacy-settings-note">口令只在当前浏览器中加盐保存，不会上传到云端。清除浏览器数据后需要重新设置。</p>
+      <div className="modal-header"><div><p className="eyebrow">账号隐私</p><h2 id="privacy-settings-title">隐私口令</h2></div><button className="icon-button" aria-label="关闭" disabled={saving} onClick={onClose}>×</button></div>
+      <p className="privacy-settings-note">设置跟随当前登录账号，在不同设备和浏览器生效。云端只保存加盐口令校验值，不保存明文；清除浏览器数据不会移除口令。</p>
       <form className="privacy-settings-form" onSubmit={(event) => void save(event)}>
         {hasPasscode && <label>当前口令<input autoFocus required type="password" autoComplete="current-password" value={currentPasscode} onChange={(event) => setCurrentPasscode(event.target.value)} /></label>}
         <label>{hasPasscode ? '新口令（不修改请留空）' : '设置口令'}<input autoFocus={!hasPasscode} required={!hasPasscode} type="password" autoComplete="new-password" value={newPasscode} onChange={(event) => setNewPasscode(event.target.value)} /></label>
         {(!hasPasscode || newPasscode) && <label>确认新口令<input required type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>}
-        <label className="privacy-toggle"><input type="checkbox" checked={requireOnLogin} onChange={(event) => setRequireOnLogin(event.target.checked)} /><span><strong>登录后需要口令解锁</strong><small>Microsoft 登录成功后仍需验证本机口令</small></span></label>
+        <label className="privacy-toggle"><input type="checkbox" checked={requireOnLogin} onChange={(event) => setRequireOnLogin(event.target.checked)} /><span><strong>登录后需要口令解锁</strong><small>任何浏览器完成 Microsoft 登录后，仍需验证账号口令</small></span></label>
         <label className="privacy-toggle"><input type="checkbox" checked={requireForIncome} onChange={(event) => setRequireForIncome(event.target.checked)} /><span><strong>展示收入时验证口令</strong><small>每次开启 5 分钟展示前验证</small></span></label>
         {error && <div className="field-error" role="alert">{error}</div>}
         <div className="modal-actions">
           {hasPasscode && <button type="button" className="danger-link" disabled={saving || !currentPasscode} onClick={() => void clearPasscode()}>关闭并清除口令</button>}
-          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="secondary" disabled={saving} onClick={onClose}>取消</button>
           <button className="primary" disabled={saving}>{saving ? '保存中…' : '保存设置'}</button>
         </div>
       </form>
@@ -337,17 +312,35 @@ function DisplayNameModal({
 
 function TransactionModal({
   transaction,
+  categories,
+  categoriesLoading,
+  categoriesError,
+  ledgerName,
   saving,
   onClose,
   onSave,
+  onCreateCategory,
+  onRetryCategories,
 }: {
   transaction?: Transaction
+  categories: LedgerCategory[]
+  categoriesLoading: boolean
+  categoriesError: string
+  ledgerName: string
   saving: boolean
   onClose: () => void
   onSave: (draft: TransactionDraft) => Promise<void>
+  onCreateCategory: (category: CategoryDraft) => Promise<LedgerCategory>
+  onRetryCategories: () => void
 }) {
-  const [draft, setDraft] = useState(() => makeDraft(transaction))
-  const categories = DEFAULT_CATEGORIES[draft.type]
+  const [input, setDraft] = useState(() => makeDraft(transaction, categories))
+  const draft = !input.categoryName && (!transaction || input.type !== transaction.type)
+    ? { ...input, categoryName: categoriesForType(categories, input.type)[0]?.name ?? '' }
+    : input
+  const [addingCategory, setAddingCategory] = useState(false)
+  const options = categoriesForType(categories, draft.type)
+  const originalCategory = transaction?.type === draft.type && (transaction.categoryName ?? '') === draft.categoryName
+  const missingCategory = !options.some((category) => category.name === draft.categoryName)
 
   const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
@@ -367,9 +360,10 @@ function TransactionModal({
             <button
               key={type}
               className={draft.type === type ? 'active' : ''}
+              disabled={saving || categoriesLoading}
               onClick={() => {
-                update('type', type)
-                update('categoryName', DEFAULT_CATEGORIES[type][0])
+                setDraft((current) => ({ ...current, type, categoryName: categoriesForType(categories, type)[0]?.name ?? '' }))
+                setAddingCategory(false)
               }}
             >
               {type === 'EXPENSE' ? '支出' : '收入'}
@@ -382,13 +376,25 @@ function TransactionModal({
         </label>
         <div className="form-grid">
           <label>日期<input type="date" value={draft.date} onChange={(e) => update('date', e.target.value)} /></label>
-          <label>分类<select value={draft.categoryName} onChange={(e) => update('categoryName', e.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+          <label>分类<select aria-label="分类" disabled={categoriesLoading || Boolean(categoriesError)} value={draft.categoryName} onChange={(e) => update('categoryName', e.target.value)}>
+            {missingCategory && <option value={draft.categoryName}>{originalCategory ? `${draft.categoryName || '未分类'}（原分类）` : '请选择分类'}</option>}
+            {options.map((category) => <option key={category.id} value={category.name}>{categoryIcon(category.icon, category.name)} {category.name}</option>)}
+          </select></label>
           <label>商户<input maxLength={100} placeholder="例如：社区超市" value={draft.merchantName} onChange={(e) => update('merchantName', e.target.value)} /></label>
           <label>备注<input maxLength={300} placeholder="可选" value={draft.note} onChange={(e) => update('note', e.target.value)} /></label>
         </div>
+        <div className="category-picker-note"><span>分类来自「{ledgerName}」，随账本共享。</span><button className="small-button" disabled={saving || categoriesLoading || Boolean(categoriesError)} onClick={() => setAddingCategory((current) => !current)}>＋ 新增分类</button></div>
+        {categoriesLoading && <p className="muted">正在读取当前账本分类…</p>}
+        {categoriesError && <div className="field-error" role="alert">{categoriesError} <button className="small-button" onClick={onRetryCategories}>重试</button></div>}
+        {addingCategory && <CategoryForm key={draft.type} type={draft.type} onCancel={() => setAddingCategory(false)} onCreate={async (input) => {
+          const created = await onCreateCategory(input)
+          update('categoryName', created.name)
+          setAddingCategory(false)
+          return created
+        }} />}
         <div className="modal-actions">
           <button className="secondary" onClick={onClose}>取消</button>
-          <button className="primary" disabled={saving || draft.amount <= 0 || !draft.date} onClick={() => void onSave(draft)}>
+          <button className="primary" disabled={saving || categoriesLoading || Boolean(categoriesError) || addingCategory || (missingCategory && !originalCategory) || draft.amount <= 0 || !draft.date} onClick={() => void onSave(draft)}>
             {saving ? '保存中…' : '保存交易'}
           </button>
         </div>
@@ -812,14 +818,25 @@ function Dashboard({
   onDisplayNameChange,
   privacySettings,
   onPrivacySettingsChange,
+  onRefreshPrivacy,
+  onVerifyPasscode,
 }: {
   account: AccountInfo
   displayName: string
   onDisplayNameChange: (name: string) => void
   privacySettings: PrivacySettings
-  onPrivacySettingsChange: (settings: PrivacySettings) => void
+  onPrivacySettingsChange: (settings: PrivacySettingsUpdate) => Promise<void>
+  onRefreshPrivacy: () => Promise<PrivacySettings>
+  onVerifyPasscode: (passcode: string) => Promise<void>
 }) {
   const [ledgerData, setLedgerData] = useState<Record<string, LedgerData>>({})
+  const [ledgerCategories, setLedgerCategories] = useState<Record<string, {
+    items: LedgerCategory[]
+    loading: boolean
+    error: string
+  }>>({})
+  const [categoryRefresh, setCategoryRefresh] = useState(0)
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
   const ledgerCursors = useRef<Record<string, number>>({})
   const [ledgers, setLedgers] = useState<FamilyLedger[]>([])
   const [invitations, setInvitations] = useState<FamilyInvitation[]>([])
@@ -836,12 +853,16 @@ function Dashboard({
   const [privacySettingsOpen, setPrivacySettingsOpen] = useState(false)
   const [displayNameOpen, setDisplayNameOpen] = useState(false)
   const [passcodePromptOpen, setPasscodePromptOpen] = useState(false)
-  const [sensitiveVisible, setSensitiveVisible] = useState(false)
+  const [sensitiveVersion, setSensitiveVersion] = useState<number | null>(null)
+  const sensitiveVisible = sensitiveVersion === privacySettings.version
+  const [checkingVisibility, setCheckingVisibility] = useState(false)
   const sensitiveDeadline = useRef(0)
   const [familyOpen, setFamilyOpen] = useState(false)
   const [createLedgerOpen, setCreateLedgerOpen] = useState(false)
   const [members, setMembers] = useState<FamilyMember[]>([])
   const selectedLedger = ledgers.find((item) => item.id === ledgerId) ?? null
+  const selectedLedgerRef = useRef(ledgerId)
+  useLayoutEffect(() => { selectedLedgerRef.current = ledgerId }, [ledgerId])
   const syncLedgerId = getSyncLedgerId(selectedLedger)
   const ledgerKey = selectedLedger
     ? `${selectedLedger.mode.toLowerCase()}:${selectedLedger.id}`
@@ -849,6 +870,11 @@ function Dashboard({
   const currentLedgerData = ledgerData[ledgerKey] ?? { transactions: [], cursor: 0, loading: true }
   const transactions = currentLedgerData.transactions.filter((item) => item.deletedAt == null)
   const loading = currentLedgerData.loading
+  const currentCategories = ledgerCategories[ledgerKey]
+  const categories = currentCategories?.items ?? []
+  const categoriesLoading = currentCategories?.loading ?? true
+  const categoriesError = currentCategories?.error ?? ''
+  const transactionModalOpen = editing !== undefined
   const api = useMemo(() => new BookkeeperApi(apiConfig.baseUrl, () => getAccessToken(account), () => selectedLedger?.role), [account, selectedLedger?.role])
 
   const loadFamily = useCallback(async () => {
@@ -899,6 +925,29 @@ function Dashboard({
   }, [api, ledgerKey, syncLedgerId])
 
   useEffect(() => {
+    if (!syncLedgerId) return
+    let active = true
+    api.getCategories(syncLedgerId).then((items) => {
+      if (active) setLedgerCategories((current) => ({
+        ...current,
+        [ledgerKey]: { items: mergeCategories(current[ledgerKey]?.items ?? [], items), loading: false, error: '' },
+      }))
+    }).catch((reason) => {
+      if (active) setLedgerCategories((current) => ({
+        ...current,
+        [ledgerKey]: { items: [], loading: false, error: reason instanceof Error ? reason.message : '账本分类加载失败' },
+      }))
+    })
+    return () => { active = false }
+  }, [api, ledgerKey, syncLedgerId, categoryRefresh, transactionModalOpen, categoriesOpen])
+
+  useEffect(() => {
+    const refresh = () => setCategoryRefresh((current) => current + 1)
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [])
+
+  useEffect(() => {
     if (!familyOpen || !ledgerId || selectedLedger?.mode !== 'FAMILY') return
     api.getMembers(ledgerId).then(setMembers).catch((reason) => setError(reason instanceof Error ? reason.message : '成员加载失败'))
   }, [api, familyOpen, ledgerId, selectedLedger?.mode])
@@ -908,15 +957,15 @@ function Dashboard({
   const summary = useMemo(() => calculateMonthSummary(visible), [visible])
   const groups = useMemo(() => groupTransactionsByDate(visible), [visible])
   const categoryTransactions = useMemo(
-    () => visible.filter((item) => item.type === 'EXPENSE' && (item.categoryName || '未分类') === categoryDetail),
+    () => visible.filter((item) => item.type === 'EXPENSE' && (item.categoryName || '未分类') === categoryDetail).sort(compareTransactionChronology),
     [categoryDetail, visible],
   )
-  const editable = canEditLedger(selectedLedger?.role)
+  const editable = Boolean(selectedLedger) && canEditLedger(selectedLedger?.role)
 
   useEffect(() => {
     if (!sensitiveVisible) return
     const hideIfExpired = () => {
-      if (Date.now() >= sensitiveDeadline.current) setSensitiveVisible(false)
+      if (Date.now() >= sensitiveDeadline.current) setSensitiveVersion(null)
     }
     const timeout = window.setTimeout(hideIfExpired, Math.max(0, sensitiveDeadline.current - Date.now()))
     window.addEventListener('focus', hideIfExpired)
@@ -939,18 +988,28 @@ function Dashboard({
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
   }, [accountMenuOpen])
 
-  const revealSensitive = () => {
+  const revealSensitive = (version = privacySettings.version) => {
     sensitiveDeadline.current = Date.now() + 5 * 60 * 1000
-    setSensitiveVisible(true)
+    setSensitiveVersion(version)
   }
 
-  const toggleSensitiveVisibility = () => {
+  const toggleSensitiveVisibility = async () => {
     if (sensitiveVisible) {
-      setSensitiveVisible(false)
-    } else if (privacySettings.requireForIncome && privacySettings.passcodeHash) {
-      setPasscodePromptOpen(true)
-    } else {
-      revealSensitive()
+      setSensitiveVersion(null)
+      return
+    }
+    setCheckingVisibility(true)
+    try {
+      const latest = await onRefreshPrivacy()
+      if (latest.requireForIncome && latest.hasPasscode) {
+        setPasscodePromptOpen(true)
+      } else {
+        revealSensitive(latest.version)
+      }
+    } catch (reason) {
+      setError(privacyErrorMessage(reason))
+    } finally {
+      setCheckingVisibility(false)
     }
   }
 
@@ -959,27 +1018,27 @@ function Dashboard({
     setError('')
     const now = Date.now()
     const existing = draft.syncId ? transactions.find((item) => item.syncId === draft.syncId) : undefined
-    const item: Transaction = {
-      syncId: draft.syncId ?? crypto.randomUUID(),
-      serverVersion: draft.serverVersion ?? 0,
-      amount: Math.abs(draft.amount),
-      type: draft.type,
-      categoryId: existing?.categoryId ?? null,
-      categoryName: draft.categoryName || null,
-      categoryIcon: existing?.categoryIcon ?? (draft.type === 'EXPENSE' ? '●' : '↑'),
-      categoryColor: existing?.categoryColor ?? (draft.type === 'EXPENSE' ? '#F37B61' : '#2BAE84'),
-      merchantName: draft.merchantName || null,
-      note: draft.note || null,
-      originalInput: existing?.originalInput ?? null,
-      date: new Date(`${draft.date}T12:00:00`).getTime(),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-      source: existing?.source ?? 'MANUAL',
-      status: 'CONFIRMED',
-      aiConfidence: existing?.aiConfidence ?? null,
-      deletedAt: null,
-    }
     try {
+      if (!selectedLedger || !editable || categoriesLoading || categoriesError) {
+        throw new Error('当前账本分类尚未就绪或没有编辑权限')
+      }
+      const item: Transaction = {
+        syncId: draft.syncId ?? crypto.randomUUID(),
+        serverVersion: draft.serverVersion ?? 0,
+        amount: Math.abs(draft.amount),
+        type: draft.type,
+        ...transactionCategoryFields(draft, categories, existing),
+        merchantName: draft.merchantName || null,
+        note: draft.note || null,
+        originalInput: existing?.originalInput ?? null,
+        date: transactionDateMillis(draft.date, new Date(now), existing ? new Date(existing.date) : undefined),
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        source: existing?.source ?? 'MANUAL',
+        status: 'CONFIRMED',
+        aiConfidence: existing?.aiConfidence ?? null,
+        deletedAt: null,
+      }
       await api.push([item], syncLedgerId)
       const refreshed = await api.pull(syncLedgerId, currentLedgerData.cursor)
       ledgerCursors.current[ledgerKey] = refreshed.cursor
@@ -993,9 +1052,28 @@ function Dashboard({
           loading: false,
         },
       }))
-      setEditing(undefined)
+      if (selectedLedgerRef.current === ledgerId) setEditing(undefined)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '交易保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function createCategory(input: CategoryDraft) {
+    if (!ledgerId || !editable) throw new Error('你没有当前账本的分类编辑权限')
+    setSaving(true)
+    try {
+      const category = await api.createCategory(input, ledgerId)
+      setLedgerCategories((current) => ({
+        ...current,
+        [ledgerKey]: {
+          items: mergeCategories(current[ledgerKey]?.items ?? [], [category]),
+          loading: false,
+          error: '',
+        },
+      }))
+      return category
     } finally {
       setSaving(false)
     }
@@ -1054,7 +1132,7 @@ function Dashboard({
       <header className="topbar">
         <div className="brand"><span className="brand-mark small">账</span><div><strong>AI Bookkeeper</strong><small>智能账本</small></div></div>
         <div className="header-actions">
-          <button className="ledger-button" aria-label="切换账本" onClick={() => setLedgerDrawerOpen(true)}>
+          <button className="ledger-button" disabled={saving} aria-label="切换账本" onClick={() => setLedgerDrawerOpen(true)}>
             <span>{selectedLedger?.mode === 'FAMILY' ? '家庭账本' : '个人账本'}</span>
             <strong>{selectedLedger?.name ?? '我的账本'} <i aria-hidden="true">›</i></strong>
           </button>
@@ -1065,7 +1143,7 @@ function Dashboard({
               <a href={GITHUB_URL} target="_blank" rel="noreferrer"><span aria-hidden="true">⌘</span><span><strong>GitHub 项目</strong><small>查看源码与版本</small></span></a>
               <a href={ANDROID_DOWNLOAD_URL}><span aria-hidden="true">↓</span><span><strong>下载 Android</strong><small>获取最新 APK</small></span></a>
               <button className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setDisplayNameOpen(true) }}><span aria-hidden="true">✎</span><span><strong>修改显示名称</strong><small>当前：{displayName}</small></span></button>
-              <button className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setPrivacySettingsOpen(true) }}><span aria-hidden="true">●</span><span><strong>隐私口令</strong><small>{privacySettings.passcodeHash ? '已启用 · 管理设置' : '保护登录和收入'}</small></span></button>
+              <button className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setPrivacySettingsOpen(true) }}><span aria-hidden="true">●</span><span><strong>隐私口令</strong><small>{privacySettings.hasPasscode ? '已启用 · 跨设备同步' : '保护登录和收入'}</small></span></button>
               <button className="account-logout" onClick={() => void logout(account)}>退出登录</button>
             </div>}
           </div>
@@ -1085,7 +1163,7 @@ function Dashboard({
         {!editable && <div className="alert info">你在此账本中拥有仅查看权限，交易编辑和同步提交已关闭。</div>}
         <section className="summary-grid">
           <article className="summary-card expense"><div><span>本月支出</span><strong>{currency.format(summary.expense)}</strong></div><span className="summary-icon">↗</span><small>{summary.count} 笔记录</small></article>
-          <article className="summary-card income"><div><span className="sensitive-title">本月收入<button className="visibility-button" aria-label={sensitiveVisible ? '隐藏收入和结余' : '显示收入和结余'} aria-pressed={sensitiveVisible} onClick={toggleSensitiveVisibility}>{sensitiveVisible ? '◉' : '⊘'}</button></span><strong className={!sensitiveVisible ? 'masked-value' : ''}>{sensitiveVisible ? currency.format(summary.income) : '••••••'}</strong></div><span className="summary-icon">↙</span><small>{sensitiveVisible ? '5 分钟后自动隐藏' : '点击眼睛临时展示'}</small></article>
+          <article className="summary-card income"><div><span className="sensitive-title">本月收入<button className="visibility-button" disabled={checkingVisibility} aria-label={sensitiveVisible ? '隐藏收入和结余' : '显示收入和结余'} aria-pressed={sensitiveVisible} onClick={() => void toggleSensitiveVisibility()}>{sensitiveVisible ? '◉' : '⊘'}</button></span><strong className={!sensitiveVisible ? 'masked-value' : ''}>{sensitiveVisible ? currency.format(summary.income) : '••••••'}</strong></div><span className="summary-icon">↙</span><small>{sensitiveVisible ? '5 分钟后自动隐藏' : '点击眼睛临时展示'}</small></article>
           <article className="summary-card balance"><div><span>本月结余</span><strong className={!sensitiveVisible ? 'masked-value' : ''}>{sensitiveVisible ? currency.format(summary.balance) : '••••••'}</strong></div><span className="summary-icon">≈</span><small>{sensitiveVisible ? '收入减去支出' : '已保护隐私'}</small></article>
         </section>
         <div className="dashboard-grid">
@@ -1100,7 +1178,7 @@ function Dashboard({
             })}</div>)}
           </section>
           <aside className="panel statistics-panel">
-            <div className="panel-header"><div><h2>支出分类</h2><p>本月消费构成</p></div></div>
+            <div className="panel-header"><div><h2>支出分类</h2><p>本月消费构成</p></div><button className="small-button" disabled={!selectedLedger} onClick={() => setCategoriesOpen(true)}>管理分类</button></div>
             <div className="donut-wrap"><div className="donut" style={{ '--expense': summary.expense ? '76%' : '0%' } as React.CSSProperties}><div><strong>{summary.categories.length}</strong><span>个分类</span></div></div></div>
             <div className="category-list">{summary.categories.slice(0, 6).map((category, index) => <button className="category-stat" key={category.name} onClick={() => setCategoryDetail(category.name)}><span className={`stat-color color-${index % 6}`} /><span className="category-stat-main"><strong>{category.name}</strong><span className="progress"><i style={{ width: `${category.percentage}%` }} /></span></span><span className="category-stat-value"><strong>{currency.format(category.amount)}</strong><small>{category.percentage.toFixed(0)}% · 查看</small></span></button>)}</div>
             {summary.categories.length === 0 && <p className="empty-small">暂无支出统计</p>}
@@ -1111,7 +1189,8 @@ function Dashboard({
       <button className="month-grid-launcher" aria-label="展开月份选择" onClick={() => setMonthPickerOpen(true)}>
         {Array.from({ length: 6 }, (_, index) => <i key={index} />)}
       </button>
-      {editing !== undefined && <TransactionModal transaction={editing ?? undefined} saving={saving} onClose={() => setEditing(undefined)} onSave={saveTransaction} />}
+      {editing !== undefined && <TransactionModal key={ledgerKey} transaction={editing ?? undefined} categories={categories} categoriesLoading={categoriesLoading} categoriesError={categoriesError} ledgerName={selectedLedger?.name ?? ''} saving={saving} onClose={() => setEditing(undefined)} onSave={saveTransaction} onCreateCategory={createCategory} onRetryCategories={() => setCategoryRefresh((current) => current + 1)} />}
+      {categoriesOpen && selectedLedger && <CategoryManager key={ledgerKey} ledgerName={selectedLedger.name} categories={categories} loading={categoriesLoading} error={categoriesError} editable={editable} onClose={() => setCategoriesOpen(false)} onCreate={createCategory} onRetry={() => setCategoryRefresh((current) => current + 1)} />}
       {monthPickerOpen && <MonthPicker
         selectedMonth={month}
         expenses={monthlyExpenses}
@@ -1137,6 +1216,9 @@ function Dashboard({
         onClose={() => setLedgerDrawerOpen(false)}
         onSelect={(selectedId) => {
           setLedgerId(selectedId)
+          setEditing(undefined)
+          setCategoryDetail(null)
+          setCategoriesOpen(false)
           setLedgerDrawerOpen(false)
         }}
         onCreate={() => {
@@ -1150,8 +1232,8 @@ function Dashboard({
       />}
       {createLedgerOpen && <CreateLedgerModal saving={saving} onClose={() => setCreateLedgerOpen(false)} onCreate={createLedger} />}
       {displayNameOpen && <DisplayNameModal currentName={displayName} loginName={account.name || account.username} onClose={() => setDisplayNameOpen(false)} onSave={onDisplayNameChange} />}
-      {privacySettingsOpen && <PrivacySettingsModal settings={privacySettings} onClose={() => setPrivacySettingsOpen(false)} onSave={onPrivacySettingsChange} />}
-      {passcodePromptOpen && <PasscodePrompt settings={privacySettings} title="展示收入与结余" description="验证隐私口令后，敏感金额将展示 5 分钟。" onCancel={() => setPasscodePromptOpen(false)} onSuccess={() => { setPasscodePromptOpen(false); revealSensitive() }} />}
+      {privacySettingsOpen && <PrivacySettingsModal key={privacySettings.version} settings={privacySettings} onClose={() => setPrivacySettingsOpen(false)} onSave={onPrivacySettingsChange} />}
+      {passcodePromptOpen && <PasscodePrompt key={privacySettings.version} onVerify={onVerifyPasscode} title="展示收入与结余" description="验证账号隐私口令后，敏感金额将展示 5 分钟。" onCancel={() => setPasscodePromptOpen(false)} onSuccess={() => { setPasscodePromptOpen(false); revealSensitive() }} />}
       {familyOpen && <FamilyPanel
         key={`${selectedLedger?.id ?? 'none'}:${selectedLedger?.mode ?? 'PERSONAL'}`}
         ledger={selectedLedger}
@@ -1175,12 +1257,123 @@ function Dashboard({
   )
 }
 
+function AccountDashboard({ account }: { account: AccountInfo }) {
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null)
+  const settingsRef = useRef<PrivacySettings | null>(null)
+  const [privacyError, setPrivacyError] = useState('')
+  const [unlockedVersion, setUnlockedVersion] = useState<number | null>(null)
+  const [displayNameOverride, setDisplayNameOverride] = useState<string | null>(() => loadDisplayName(account.homeAccountId))
+  const active = useRef(true)
+  const requestSequence = useRef(0)
+  const privacyRequest = useRef<Promise<PrivacySettings> | null>(null)
+  const api = useMemo(() => new BookkeeperApi(apiConfig.baseUrl, () => getAccessToken(account)), [account])
+
+  const reportPrivacyError = useCallback((reason: unknown) => {
+    if (active.current) setPrivacyError(privacyErrorMessage(reason))
+  }, [])
+
+  const applySettings = useCallback((next: PrivacySettings) => {
+    if (!active.current || (settingsRef.current && next.version < settingsRef.current.version)) return
+    settingsRef.current = next
+    setPrivacySettings(next)
+    setPrivacyError('')
+  }, [])
+
+  const refreshPrivacy = useCallback((): Promise<PrivacySettings> => {
+    if (privacyRequest.current) return privacyRequest.current
+    const sequence = ++requestSequence.current
+    const request = loadAccountPrivacy(api, account.homeAccountId).then((next) => {
+      if (sequence === requestSequence.current) applySettings(next)
+      return settingsRef.current && settingsRef.current.version > next.version ? settingsRef.current : next
+    }).catch((reason: unknown) => {
+      if (sequence === requestSequence.current) reportPrivacyError(reason)
+      throw reason
+    }).finally(() => {
+      if (privacyRequest.current === request) privacyRequest.current = null
+    })
+    privacyRequest.current = request
+    return request
+  }, [account.homeAccountId, api, applySettings, reportPrivacyError])
+
+  useEffect(() => {
+    active.current = true
+    const refresh = () => {
+      if (document.visibilityState !== 'hidden') void refreshPrivacy().catch(reportPrivacyError)
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      active.current = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [refreshPrivacy, reportPrivacyError])
+
+  const verifyPasscode = async (passcode: string) => {
+    const current = settingsRef.current
+    if (!current) throw new Error('请先读取账号隐私设置')
+    try {
+      const verified = await api.verifyPrivacyPasscode(passcode, current.version)
+      if (!active.current || settingsRef.current?.version !== verified.version) {
+        throw new Error('账号隐私设置已变化，请重新验证')
+      }
+      setUnlockedVersion(verified.version)
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409) await refreshPrivacy()
+      throw reason
+    }
+  }
+
+  const savePrivacySettings = async (next: PrivacySettingsUpdate) => {
+    try {
+      const saved = await api.updatePrivacySettings(next)
+      requestSequence.current++
+      applySettings(saved)
+      if (active.current) setUnlockedVersion(saved.version)
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 409) await refreshPrivacy()
+      throw reason
+    }
+  }
+
+  if (!privacySettings || privacyError) {
+    return <main className="login-page"><section className="passcode-card">
+      <div className="privacy-shield" aria-hidden="true">●</div>
+      <h2>{privacyError ? '暂时无法读取隐私设置' : '正在读取账号隐私设置'}</h2>
+      <p>{privacyError || '在确认账号的口令要求之前，不会展示账本数据。'}</p>
+      <div className="passcode-secondary-actions">
+        {privacyError && <button onClick={() => void refreshPrivacy().catch(reportPrivacyError)}>重试</button>}
+        <button onClick={() => void logout(account)}>退出登录</button>
+      </div>
+    </section></main>
+  }
+  if (privacySettings.requireOnLogin && privacySettings.hasPasscode && unlockedVersion !== privacySettings.version) {
+    return <PasscodePrompt
+      key={privacySettings.version}
+      onVerify={verifyPasscode}
+      title="解锁账本"
+      description="Microsoft 登录已完成，请输入账号隐私口令继续。此口令在不同设备和浏览器通用。"
+      onLogout={() => void logout(account)}
+    />
+  }
+  return <Dashboard
+    account={account}
+    displayName={displayNameOverride ?? (account.name || account.username)}
+    onDisplayNameChange={(next) => {
+      setDisplayNameOverride(saveDisplayName(account.homeAccountId, next))
+    }}
+    privacySettings={privacySettings}
+    onPrivacySettingsChange={savePrivacySettings}
+    onRefreshPrivacy={refreshPrivacy}
+    onVerifyPasscode={verifyPasscode}
+  />
+}
+
 export default function App() {
   const [account, setAccount] = useState<AccountInfo | null>(() => msalInstance?.getActiveAccount() ?? msalInstance?.getAllAccounts()[0] ?? null)
-  const [privacyOverrides, setPrivacyOverrides] = useState<Record<string, PrivacySettings>>({})
-  const [displayNameOverrides, setDisplayNameOverrides] = useState<Record<string, string | null>>({})
-  const [unlockedAccountId, setUnlockedAccountId] = useState<string | null>(null)
-  const authError = configError
 
   useEffect(() => {
     if (!msalInstance) return
@@ -1188,38 +1381,13 @@ export default function App() {
     const callback = instance.addEventCallback((event) => {
       if (event.eventType.includes('LOGIN_SUCCESS') || event.eventType.includes('ACQUIRE_TOKEN_SUCCESS')) {
         const next = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
-        if (next) setAccount(next)
+        if (next) setAccount((current) => current?.homeAccountId === next.homeAccountId ? current : next)
       }
+      if (event.eventType.includes('LOGOUT_SUCCESS')) setAccount(null)
     })
     return () => { if (callback) instance.removeEventCallback(callback) }
   }, [])
 
-  if (!account) return <LoginScreen error={authError || undefined} />
-  const accountId = account.homeAccountId
-  const privacySettings = privacyOverrides[accountId] ?? loadPrivacySettings(accountId)
-  const loginName = account.name || account.username
-  const displayName = displayNameOverrides[accountId] ?? loadDisplayName(accountId) ?? loginName
-  if (privacySettings.requireOnLogin && privacySettings.passcodeHash && unlockedAccountId !== accountId) {
-    return <PasscodePrompt
-      settings={privacySettings}
-      title="解锁账本"
-      description="Microsoft 登录已完成，请输入本机隐私口令继续。"
-      onSuccess={() => setUnlockedAccountId(accountId)}
-      onLogout={() => void logout(account)}
-    />
-  }
-  return <Dashboard
-    account={account}
-    displayName={displayName}
-    onDisplayNameChange={(next) => {
-      const saved = saveDisplayName(accountId, next)
-      setDisplayNameOverrides((current) => ({ ...current, [accountId]: saved }))
-    }}
-    privacySettings={privacySettings}
-    onPrivacySettingsChange={(next) => {
-      savePrivacySettings(accountId, next)
-      setPrivacyOverrides((current) => ({ ...current, [accountId]: next }))
-      setUnlockedAccountId(accountId)
-    }}
-  />
+  if (!account) return <LoginScreen error={configError || undefined} />
+  return <AccountDashboard key={account.homeAccountId} account={account} />
 }

@@ -1,5 +1,6 @@
 package com.aibookkeeper.core.data.repository
 
+import app.cash.turbine.test
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.dao.TransactionDao
 import com.aibookkeeper.core.data.local.entity.CategoryEntity
@@ -13,6 +14,7 @@ import com.aibookkeeper.core.data.model.TransactionType
 import io.mockk.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -53,6 +55,7 @@ class TransactionRepositoryImplTest {
     fun setUp() {
         transactionDao = mockk(relaxUnitFun = true)
         categoryDao = mockk()
+        every { categoryDao.observeAll() } returns flowOf(emptyList())
         mapper = mockk()
         repository = TransactionRepositoryImpl(transactionDao, categoryDao, mapper)
     }
@@ -203,6 +206,26 @@ class TransactionRepositoryImplTest {
 
     @Nested
     inner class ObserveById {
+
+        @Test
+        fun `catalog-only metadata update refreshes existing transaction without changing transaction row`() = runTest {
+            val categories = MutableStateFlow(listOf(sampleCategory))
+            every { categoryDao.observeAll() } returns categories
+            every { transactionDao.observeById(1L) } returns flowOf(sampleEntity)
+            every { mapper.toDomain(sampleEntity) } returns sampleDomain
+            coEvery { categoryDao.getById(2L) } answers { categories.value.single() }
+
+            repository.observeById(1).test {
+                assertEquals("ic_food", awaitItem()?.categoryIcon)
+                categories.value = listOf(sampleCategory.copy(icon = "🍲", color = "#123ABC"))
+                val updated = awaitItem()
+                assertEquals(2L, updated?.categoryId)
+                assertEquals("🍲", updated?.categoryIcon)
+                assertEquals("#123ABC", updated?.categoryColor)
+                coVerify(exactly = 0) { transactionDao.updateMonotonic(any()) }
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
         @Test
         fun should_enrichCategoryInfo_when_observingById() = runTest {
@@ -580,7 +603,7 @@ class TransactionRepositoryImplTest {
                 serverVersion = 12,
                 syncStatus = "SYNCED"
             )
-            coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns sampleCategory
+            coEvery { categoryDao.resolveRemoteCategory("餐饮", "EXPENSE", any(), any()) } returns 2L
             every {
                 mapper.toEntity(remote.copy(categoryId = 2))
             } returns mapped

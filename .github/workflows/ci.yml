@@ -149,10 +149,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run Room integration tests
+      - name: Run voice and Room regression tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_6
-          script: ./gradlew :core-data:connectedDebugAndroidTest --no-daemon --stacktrace
+          script: ./gradlew :feature-input:connectedDebugAndroidTest :core-data:connectedDebugAndroidTest --no-daemon --stacktrace

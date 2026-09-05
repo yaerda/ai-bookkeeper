@@ -7,6 +7,71 @@ const sample = {} as Transaction
 afterEach(() => vi.unstubAllGlobals())
 
 describe('API authorization and permission boundaries', () => {
+  it('loads the exact selected ledger category catalog', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{"categories":[]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token', () => 'VIEWER')
+    await expect(api.getCategories('shared-ledger')).resolves.toEqual([])
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://api.example/api/categories?ledgerId=shared-ledger')
+    expect(init?.cache).toBe('no-store')
+  })
+
+  it('blocks viewer category creation before token acquisition', async () => {
+    const token = vi.fn(async () => 'token')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', token, () => 'VIEWER')
+    await expect(api.createCategory({ name: '宠物', type: 'EXPENSE', icon: '🐶', color: '#607D8B' }, 'ledger')).rejects.toThrow('VIEWER_PERMISSION_DENIED')
+    expect(token).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends custom category metadata to the selected shared ledger', async () => {
+    const category = { id: 25, name: '宠物', type: 'EXPENSE', icon: '🐶', color: '#607D8B', sortOrder: 1000, isSystem: false }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ category })))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token', () => 'EDITOR')
+    const input = { name: '宠物', type: 'EXPENSE' as const, icon: '🐶', color: '#607D8B' }
+    await expect(api.createCategory(input, 'shared-ledger')).resolves.toEqual(category)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('categories?ledgerId=shared-ledger')
+    expect(JSON.parse(String(init?.body))).toEqual(input)
+  })
+
+  it('loads privacy by authenticated user, not selected ledger, with caching disabled', async () => {
+    const settings = { initialized: true, hasPasscode: true, requireOnLogin: true, requireForIncome: true, version: 4 }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(settings)))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token', () => 'VIEWER')
+    await expect(api.getPrivacySettings()).resolves.toEqual(settings)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://api.example/api/privacy/settings')
+    expect(init?.cache).toBe('no-store')
+  })
+
+  it('rejects missing privacy fields rather than disabling the lock', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token')
+    await expect(api.getPrivacySettings()).rejects.toThrow('隐私设置响应无效')
+  })
+
+  it('verifies passcodes on the server against the current settings version', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{"verified":true,"version":3}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token')
+    await expect(api.verifyPrivacyPasscode('1234', 3)).resolves.toEqual({ verified: true, version: 3 })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://api.example/api/privacy/verify')
+    expect(JSON.parse(String(init?.body))).toEqual({ passcode: '1234', version: 3 })
+  })
+
+  it('does not accept a verification response for an older setting', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"verified":true,"version":2}')))
+    const api = new BookkeeperApi('https://api.example/api', async () => 'token')
+    await expect(api.verifyPrivacyPasscode('1234', 3)).rejects.toThrow('设置已变化')
+  })
+
   it('blocks VIEWER pushes before requesting a token or calling fetch', async () => {
     const token = vi.fn(async () => 'secret')
     const fetchMock = vi.fn()

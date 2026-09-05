@@ -1,4 +1,5 @@
 import type { Transaction } from './types'
+import { compareTransactionChronology } from './dates'
 
 export interface CategorySummary {
   name: string
@@ -93,7 +94,7 @@ export function formatCompactAmount(amount: number): string {
 }
 
 export function groupTransactionsByDate(transactions: Transaction[]) {
-  const sorted = [...transactions].sort((a, b) => b.date - a.date || b.updatedAt - a.updatedAt)
+  const sorted = [...transactions].sort(compareTransactionChronology)
   const groups = new Map<string, { dateKey: string; timestamp: number; expense: number; transactions: Transaction[] }>()
   for (const item of sorted) {
     const date = new Date(item.date)

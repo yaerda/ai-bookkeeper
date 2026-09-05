@@ -12,6 +12,7 @@ import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.time.LocalDateTime
 import java.time.YearMonth
@@ -49,16 +50,18 @@ class TransactionRepositoryImpl @Inject constructor(
         }
 
     override fun observeById(id: Long): Flow<Transaction?> =
-        transactionDao.observeById(id).map { entity ->
+        transactionDao.observeById(id).withCategoryChanges().map { entity ->
             entity?.let { enrichWithCategory(mapper.toDomain(it)) }
         }
 
     override fun observeByDateRange(start: LocalDateTime, end: LocalDateTime): Flow<List<Transaction>> =
         transactionDao.observeByDateRange(start.toEpochMillis(), end.toEpochMillis())
+            .withCategoryChanges()
             .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observeByMonth(yearMonth: YearMonth): Flow<List<Transaction>> =
         transactionDao.observeByDateRange(yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis())
+            .withCategoryChanges()
             .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observeTransactionMonths(): Flow<List<TransactionMonthSummary>> =
@@ -72,6 +75,7 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override fun observePendingTransactions(): Flow<List<Transaction>> =
         transactionDao.observeByStatus(TransactionStatus.PENDING.name)
+            .withCategoryChanges()
             .map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
 
     override fun observePendingSyncCount(): Flow<Int> =
@@ -82,7 +86,10 @@ class TransactionRepositoryImpl @Inject constructor(
             categoryId.takeIf { it > 0 },
             yearMonth.startOfMonthMillis(),
             yearMonth.endOfMonthMillis()
-        ).map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
+        ).withCategoryChanges().map { entities -> entities.map { enrichWithCategory(mapper.toDomain(it)) } }
+
+    private fun <T> Flow<T>.withCategoryChanges(): Flow<T> =
+        combine(categoryDao.observeAll()) { value, _ -> value }
 
     /**
      * Resolves category name/icon/color from the categories table
@@ -142,7 +149,7 @@ class TransactionRepositoryImpl @Inject constructor(
     override fun observeExpenseBreakdown(yearMonth: YearMonth): Flow<List<CategoryExpense>> =
         transactionDao.observeExpenseBreakdown(
             yearMonth.startOfMonthMillis(), yearMonth.endOfMonthMillis()
-        ).map { sums ->
+        ).withCategoryChanges().map { sums ->
             val total = sums.sumOf { it.total }
             sums.mapNotNull { sum ->
                 val category = sum.categoryId?.let { categoryDao.getById(it) }
@@ -187,7 +194,12 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override suspend fun mergeRemote(transaction: Transaction): Boolean {
         val localCategoryId = transaction.categoryName
-            ?.let { categoryDao.findByNameAndType(it, transaction.type.name)?.id }
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                categoryDao.resolveRemoteCategory(
+                    it, transaction.type.name, transaction.categoryIcon, transaction.categoryColor
+                )
+            }
         return transactionDao.mergeRemote(
             mapper.toEntity(
                 transaction.copy(

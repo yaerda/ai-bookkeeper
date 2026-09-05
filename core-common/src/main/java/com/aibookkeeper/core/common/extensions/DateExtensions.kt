@@ -5,6 +5,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeParseException
+import java.util.logging.Logger
 
 private val WEEKDAY_NAMES = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
@@ -33,6 +36,20 @@ fun LocalDateTime.toEpochMillis(zone: ZoneId = ZoneId.systemDefault()): Long =
 
 fun Long.toLocalDateTime(zone: ZoneId = ZoneId.systemDefault()): LocalDateTime =
     Instant.ofEpochMilli(this).atZone(zone).toLocalDateTime()
+
+fun resolveTransactionDate(date: String, recordedAt: LocalDateTime): LocalDateTime =
+    try {
+        LocalDate.parse(date).atTime(recordedAt.toLocalTime())
+    } catch (_: DateTimeParseException) {
+        Logger.getLogger("TransactionDate").warning("Invalid extracted date; using the recording timestamp")
+        recordedAt
+    }
+
+fun LocalDate.toDatePickerMillis(): Long =
+    atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+fun Long.toDatePickerDate(): LocalDate =
+    Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
 
 fun YearMonth.startOfMonthMillis(zone: ZoneId = ZoneId.systemDefault()): Long =
     atDay(1).atStartOfDay().toEpochMillis(zone)

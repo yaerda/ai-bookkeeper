@@ -119,7 +119,56 @@ data class CreateLedgerRequest(
     val mode: String = "PERSONAL"
 )
 
+@Serializable
+data class LedgerCategoryDto(
+    val id: Long,
+    val name: String,
+    val type: String,
+    val icon: String,
+    val color: String,
+    val sortOrder: Int,
+    val isSystem: Boolean
+)
+
+@Serializable
+data class CreateCategoryRequest(
+    val name: String,
+    val type: String,
+    val icon: String,
+    val color: String,
+    val sortOrder: Int = 1000
+)
+
+@Serializable
+data class ImportCategoriesRequest(val categories: List<CreateCategoryRequest>)
+
+@Serializable
+data class CategoriesResponse(val categories: List<LedgerCategoryDto>)
+
+@Serializable
+data class CategoryResponse(val category: LedgerCategoryDto)
+
 interface SyncApi {
+    @GET("categories")
+    suspend fun categories(
+        @Header("Authorization") authorization: String,
+        @Query("ledgerId") ledgerId: String? = null
+    ): Response<CategoriesResponse>
+
+    @POST("categories")
+    suspend fun createCategory(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateCategoryRequest,
+        @Query("ledgerId") ledgerId: String? = null
+    ): Response<CategoryResponse>
+
+    @POST("categories/import")
+    suspend fun importCategories(
+        @Header("Authorization") authorization: String,
+        @Body request: ImportCategoriesRequest,
+        @Query("ledgerId") ledgerId: String? = null
+    ): Response<CategoriesResponse>
+
     @POST("sync/push")
     suspend fun push(
         @Header("Authorization") authorization: String,

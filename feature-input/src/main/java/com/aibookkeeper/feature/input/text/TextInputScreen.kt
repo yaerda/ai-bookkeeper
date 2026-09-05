@@ -2,12 +2,7 @@ package com.aibookkeeper.feature.input.text
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,9 +63,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -100,9 +96,10 @@ import com.aibookkeeper.feature.input.common.CategoryNameAndEmojiFields
 import com.aibookkeeper.feature.input.common.resolveCategoryIcon
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
-import com.aibookkeeper.feature.input.home.VoiceInputMode
 import com.aibookkeeper.feature.input.home.VoiceStatus
 import com.aibookkeeper.feature.input.components.holdToTalkGesture
+import com.aibookkeeper.feature.input.components.rememberSpeechInputSession
+import com.aibookkeeper.feature.input.components.SpeechPhase
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -115,8 +112,15 @@ fun TextInputScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
+    val selection = ledgerState.selection
+    val initialSelection = remember { selection }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(selection) {
+        if (selection != initialSelection) viewModel.resetToIdle()
+    }
 
     LaunchedEffect(uiState) {
         val success = uiState as? TextInputUiState.Success ?: return@LaunchedEffect
@@ -145,18 +149,31 @@ fun TextInputScreen(
         ) {
             when (uiState) {
                 is TextInputUiState.Idle -> {
-                    AiInputSection(
-                        navController = navController,
-                        categories = categories,
-                        initialCategoryId = initialCategoryId,
-                        viewModel = viewModel,
-                        onSubmitText = viewModel::submitText,
-                        onManualSave = { amount, categoryId, categoryName, note, type ->
-                            viewModel.saveManual(amount, categoryId, categoryName, note, type)
-                        },
-                        onAddCategory = viewModel::addCategory,
-                        onUpdateCategory = { cat, name, icon -> viewModel.updateCategory(cat, name, icon) }
-                    )
+                    if (!ledgerState.canEdit) {
+                        Text(ledgerState.errorMessage ?: if (ledgerState.isLoading) {
+                            "账本分类正在加载，请稍候"
+                        } else {
+                            "你只有查看权限"
+                        })
+                    } else key(selection) {
+                        AiInputSection(
+                            navController = navController,
+                            categories = categories,
+                            initialCategoryId = initialCategoryId.takeIf { selection == initialSelection },
+                            viewModel = viewModel,
+                            onSubmitText = { viewModel.submitText(it, selection) },
+                            onManualSave = { amount, categoryId, categoryName, note, type ->
+                                viewModel.saveManual(amount, categoryId, categoryName, note, type, selection)
+                            },
+                            onAddCategory = { name, icon, type ->
+                                viewModel.addCategory(name, icon, type, selection)
+                            },
+                            canUpdateCategories = ledgerState.canUpdateCategories,
+                            onUpdateCategory = { cat, name, icon ->
+                                viewModel.updateCategory(cat, name, icon, selection)
+                            }
+                        )
+                    }
                 }
                 is TextInputUiState.Extracting -> {
                     ExtractingSection()
@@ -202,7 +219,8 @@ private fun AiInputSection(
     viewModel: TextInputViewModel,
     onSubmitText: (String) -> Unit,
     onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
-    onAddCategory: (String, String) -> Unit = { _, _ -> },
+    onAddCategory: (String, String, TransactionType) -> Unit = { _, _, _ -> },
+    canUpdateCategories: Boolean = true,
     onUpdateCategory: (Category, String, String) -> Unit = { _, _, _ -> }
 ) {
     var inputText by remember { mutableStateOf("") }
@@ -216,72 +234,17 @@ private fun AiInputSection(
     var newCategoryName by remember { mutableStateOf("") }
     var newCategoryPresetIcon by remember { mutableStateOf(CategoryIconMapper.DEFAULT_ICON_KEY) }
     var newCategoryCustomEmoji by remember { mutableStateOf("") }
+    var newCategoryType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var pendingVoiceRequest by remember { mutableStateOf(false) }
-    var isRecording by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
 
-    // Local SpeechRecognizer (no system UI)
-    val speechRecognizer = remember {
-        SpeechRecognizer.createSpeechRecognizer(context)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            speechRecognizer.destroy()
-        }
-    }
-
-    // Set up recognition listener
-    remember(speechRecognizer) {
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onResults(results: Bundle?) {
-                isRecording = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()?.trim()
-                if (!text.isNullOrBlank()) {
-                    inputText = if (inputText.isBlank()) text else "$inputText\n$text"
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onError(error: Int) {
-                isRecording = false
-                val msg = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音内容"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
-                    SpeechRecognizer.ERROR_AUDIO -> "录音错误"
-                    SpeechRecognizer.ERROR_NETWORK -> "网络不可用，请检查连接"
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
-                    else -> "语音识别失败 (错误码: $error)"
-                }
-                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-            }
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { isRecording = false }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        true // return value for remember
-    }
-
-    fun startLocalSpeechRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-        }
-        isRecording = true
-        speechRecognizer.startListening(intent)
-    }
-
-    fun stopLocalSpeechRecognition() {
-        speechRecognizer.stopListening()
-        isRecording = false
-    }
+    val speech = rememberSpeechInputSession(
+        onText = { text -> inputText = if (inputText.isBlank()) text else "$inputText\n$text" }
+    )
+    val speechState by speech.state.collectAsStateWithLifecycle()
+    val isRecording = speechState.isRecording
 
     fun resetNewCategoryDraft() {
         newCategoryName = ""
@@ -301,7 +264,7 @@ private fun AiInputSection(
     ) { granted ->
         if (granted) {
             pendingVoiceRequest = false
-            startLocalSpeechRecognition()
+            speech.start()
         } else {
             pendingVoiceRequest = false
             Toast.makeText(context, "请授予麦克风权限后再使用语音输入", Toast.LENGTH_SHORT).show()
@@ -310,11 +273,7 @@ private fun AiInputSection(
 
     fun startVoiceWithPermissionGuard() {
         if (context.hasAudioPermission()) {
-            if (isRecording) {
-                stopLocalSpeechRecognition()
-            } else {
-                startLocalSpeechRecognition()
-            }
+            speech.start()
         } else if (!pendingVoiceRequest) {
             pendingVoiceRequest = true
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -400,13 +359,20 @@ private fun AiInputSection(
         }
     }
 
+    speechState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    if (speechState.partialText.isNotBlank()) {
+        Text(speechState.partialText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     AiActionButton(
         aiInput = inputText,
         isRecording = isRecording,
         isSubmitting = false,
-        voiceStatus = voiceStatus,
+        voiceStatus = if (speechState.isProcessing) VoiceStatus.Processing else voiceStatus,
+        recordingLabel = if (speechState.phase == SpeechPhase.STARTING) "正在打开麦克风…" else "麦克风已就绪，松开结束",
+        onHoldReleased = speech::release,
+        onHoldCancelled = speech::cancel,
         onSubmit = ::submitInput,
-        onVoiceToggle = {
+        onHoldStarted = {
             when {
                 voiceStatus is VoiceStatus.Processing -> {
                     Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()
@@ -421,6 +387,13 @@ private fun AiInputSection(
     Spacer(modifier = Modifier.height(24.dp))
 
     // Quick category grid
+    if (!canUpdateCategories) {
+        Text(
+            "分类与云端共享，可新增，暂不支持修改或删除。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
     Text(
         text = "🏷️ 快速分类",
         style = MaterialTheme.typography.titleSmall,
@@ -434,7 +407,7 @@ private fun AiInputSection(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         maxItemsInEachRow = 4
     ) {
-        val visibleCategories = categories.take(8)
+        val visibleCategories = categories.filter { it.type == TransactionType.EXPENSE }.take(8)
         visibleCategories.forEach { cat ->
             CategoryGridItem(
                 category = cat,
@@ -442,7 +415,7 @@ private fun AiInputSection(
                     gridSelectedCategory = cat
                     showManualForm = true
                 },
-                onLongClick = { editingCategory = cat },
+                onLongClick = { if (canUpdateCategories) editingCategory = cat },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -469,7 +442,10 @@ private fun AiInputSection(
             Text(if (showManualForm) "收起手动输入" else "✏️ 手动输入")
         }
         OutlinedButton(
-            onClick = { showAddCategoryDialog = true },
+            onClick = {
+                newCategoryType = TransactionType.EXPENSE
+                showAddCategoryDialog = true
+            },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -507,7 +483,10 @@ private fun AiInputSection(
                             onManualSave(amount, catId, catName, note, type)
                             showManualForm = false
                         },
-                        onOpenAddCategoryDialog = { showAddCategoryDialog = true },
+                        onOpenAddCategoryDialog = {
+                            newCategoryType = it
+                            showAddCategoryDialog = true
+                        },
                         initialCategory = gridSelectedCategory
                     )
                 }
@@ -520,7 +499,7 @@ private fun AiInputSection(
             name = newCategoryName,
             presetIcon = newCategoryPresetIcon,
             customEmoji = newCategoryCustomEmoji,
-            onNameChange = { if (it.length <= 6) newCategoryName = it },
+            onNameChange = { if (it.length <= 100) newCategoryName = it },
             onPresetIconSelected = { iconKey ->
                 newCategoryPresetIcon = iconKey
                 newCategoryCustomEmoji = CategoryIconMapper.getEmoji(iconKey)
@@ -537,7 +516,8 @@ private fun AiInputSection(
             onConfirm = {
                 onAddCategory(
                     newCategoryName,
-                    resolveCategoryIcon(newCategoryPresetIcon, newCategoryCustomEmoji)
+                    resolveCategoryIcon(newCategoryPresetIcon, newCategoryCustomEmoji),
+                    newCategoryType
                 )
                 showAddCategoryDialog = false
                 resetNewCategoryDraft()
@@ -562,13 +542,13 @@ private fun AiInputSection(
 private fun ManualInputForm(
     categories: List<Category>,
     onSave: (Double, Long?, String, String?, TransactionType) -> Unit,
-    onOpenAddCategoryDialog: () -> Unit = {},
+    onOpenAddCategoryDialog: (TransactionType) -> Unit = {},
     initialCategory: Category? = null
 ) {
     var amountText by remember { mutableStateOf("") }
     var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var note by remember { mutableStateOf("") }
-    var isExpense by remember { mutableStateOf(true) }
+    var isExpense by remember { mutableStateOf(initialCategory?.type != TransactionType.INCOME) }
 
     Card(
         modifier = Modifier
@@ -587,13 +567,13 @@ private fun ManualInputForm(
             ) {
                 FilterChip(
                     selected = isExpense,
-                    onClick = { isExpense = true },
+                    onClick = { isExpense = true; selectedCategory = null },
                     label = { Text("支出") }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 FilterChip(
                     selected = !isExpense,
-                    onClick = { isExpense = false },
+                    onClick = { isExpense = false; selectedCategory = null },
                     label = { Text("收入") }
                 )
             }
@@ -630,7 +610,9 @@ private fun ManualInputForm(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                categories.forEach { cat ->
+                categories.filter {
+                    it.type == if (isExpense) TransactionType.EXPENSE else TransactionType.INCOME
+                }.forEach { cat ->
                     val emoji = CategoryIconMapper.getEmoji(cat.icon)
                     FilterChip(
                         selected = selectedCategory?.id == cat.id,
@@ -641,7 +623,11 @@ private fun ManualInputForm(
                 // Add custom category button
                 FilterChip(
                     selected = false,
-                    onClick = onOpenAddCategoryDialog,
+                    onClick = {
+                        onOpenAddCategoryDialog(
+                            if (isExpense) TransactionType.EXPENSE else TransactionType.INCOME
+                        )
+                    },
                     label = { Text("＋ 新分类") }
                 )
             }
@@ -1015,8 +1001,11 @@ private fun AiActionButton(
     isRecording: Boolean,
     isSubmitting: Boolean,
     voiceStatus: VoiceStatus,
+    recordingLabel: String,
+    onHoldReleased: () -> Unit,
+    onHoldCancelled: () -> Unit,
     onSubmit: () -> Unit,
-    onVoiceToggle: () -> Unit
+    onHoldStarted: () -> Unit
 ) {
     val isProcessing = isSubmitting || voiceStatus is VoiceStatus.Processing
 
@@ -1043,6 +1032,7 @@ private fun AiActionButton(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("text-voice-submit")
             .clip(RoundedCornerShape(12.dp))
             .background(
                 if (isRecording) buttonColor.copy(alpha = pulseAlpha) else buttonColor
@@ -1051,7 +1041,9 @@ private fun AiActionButton(
                 isRecording = isRecording,
                 isProcessing = isProcessing,
                 hasSubmitContent = aiInput.isNotBlank(),
-                onVoiceToggle = onVoiceToggle,
+                onHoldStarted = onHoldStarted,
+                onHoldReleased = onHoldReleased,
+                onHoldCancelled = onHoldCancelled,
                 onSubmit = onSubmit
             )
             .padding(vertical = 14.dp),
@@ -1070,7 +1062,7 @@ private fun AiActionButton(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("🎙 录音中...松开结束", color = Color.White)
+                    Text(recordingLabel, color = Color.White)
                 }
                 isSubmitting -> {
                     CircularProgressIndicator(

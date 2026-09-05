@@ -32,6 +32,7 @@ class CategoryRepositoryImplTest {
     @BeforeEach
     fun setUp() {
         categoryDao = mockk(relaxUnitFun = true)
+        coEvery { categoryDao.getAllOnce() } returns emptyList()
         mapper = mockk()
         repository = CategoryRepositoryImpl(categoryDao, mapper)
     }

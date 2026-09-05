@@ -11,6 +11,9 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
+import com.aibookkeeper.core.data.repository.LedgerOption
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
@@ -25,6 +28,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -44,6 +49,8 @@ class TextInputViewModelTest {
     private val aiExtractionRepository: AiExtractionRepository = mockk()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val ledgerContext: LedgerContext = mockk()
+    private val ledgerState = MutableStateFlow(LedgerContextState())
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
     private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
@@ -51,7 +58,12 @@ class TextInputViewModelTest {
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+        every { categoryRepository.observeAllCategories() } returns flowOf(emptyList())
+        every { ledgerContext.state } returns ledgerState
+        coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+        coEvery { categoryRepository.getById(any()) } answers {
+            Category(firstArg(), "餐饮", "ic_food", "#FF5722", TransactionType.EXPENSE)
+        }
         every { voiceTranscriptionRepository.isConfigured() } returns false
         every { secureConfigStore.isLocalSpeechPreferred() } returns true
         every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
@@ -70,7 +82,8 @@ class TextInputViewModelTest {
             categoryRepository,
             voiceTranscriptionRepository,
             secureConfigStore,
-            systemSpeechRecognitionManager
+            systemSpeechRecognitionManager,
+            ledgerContext
         )
     }
 
@@ -92,6 +105,106 @@ class TextInputViewModelTest {
         confidence = confidence,
         source = ExtractionSource.LOCAL_RULE
     )
+
+    @Nested
+    inner class LedgerIsolation {
+        private fun selectShared(role: String = "EDITOR") {
+            val shared = LedgerOption("shared", "家庭", "", role, "FAMILY", false)
+            ledgerState.value = LedgerContextState(
+                isSignedIn = true,
+                ledgers = listOf(shared),
+                selectedLedgerId = shared.id,
+                selectionVersion = ledgerState.value.selectionVersion + 1
+            )
+        }
+
+        @Test
+        fun `viewer cannot add a category or save even when called directly`() = runTest {
+            selectShared("VIEWER")
+            val vm = createViewModel()
+            vm.addCategory("新分类", "🪴")
+            testDispatcher.scheduler.advanceUntilIdle()
+            assertEquals("你只有查看权限", (vm.uiState.value as TextInputUiState.Error).message)
+            vm.resetToIdle()
+            vm.saveManual(5.0, 1, "餐饮", null, TransactionType.EXPENSE)
+            testDispatcher.scheduler.advanceUntilIdle()
+            coVerify(exactly = 0) { categoryRepository.create(any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `switching ledger while resolving category never saves stale category ID`() = runTest {
+            val pending = CompletableDeferred<Category>()
+            coEvery { categoryRepository.getById(1) } coAnswers { pending.await() }
+            val vm = createViewModel()
+            vm.saveManual(5.0, 1, "餐饮", null, TransactionType.EXPENSE)
+            testDispatcher.scheduler.runCurrent()
+            selectShared()
+            pending.complete(Category(1, "餐饮", "ic_food", "#FF5722", TransactionType.EXPENSE))
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.uiState.value is TextInputUiState.Error)
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `manual form from previous ledger is rejected even with colliding category IDs and names`() = runTest {
+            val vm = createViewModel()
+            val originalSelection = ledgerState.value.selection
+            selectShared()
+            vm.saveManual(5.0, 1, "餐饮", null, TransactionType.EXPENSE, originalSelection)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.uiState.value is TextInputUiState.Error)
+            coVerify(exactly = 0) { categoryRepository.getById(any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `AI preview from earlier account session cannot be confirmed`() = runTest {
+            coEvery { aiExtractionRepository.extract(any(), any()) } returns Result.success(createExtractionResult())
+            val vm = createViewModel()
+            vm.submitText("午饭35")
+            testDispatcher.scheduler.advanceUntilIdle()
+            assertTrue(vm.uiState.value is TextInputUiState.Preview)
+            ledgerState.value = ledgerState.value.copy(selectionVersion = 2)
+            vm.confirmSave()
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.uiState.value is TextInputUiState.Error)
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `server category failure is shown to caller`() = runTest {
+            selectShared()
+            coEvery { categoryRepository.create(any()) } returns Result.failure(IllegalStateException("HTTP 403"))
+            val vm = createViewModel()
+            vm.addCategory("新分类", "🪴")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertEquals("HTTP 403", (vm.uiState.value as TextInputUiState.Error).message)
+        }
+
+        @Test
+        fun `saving Web category uses canonical icon color name and cloud ID`() = runTest {
+            selectShared()
+            val category = Category(900, "家庭菜园", "🪴", "#123ABC", TransactionType.EXPENSE)
+            coEvery { categoryRepository.getById(900) } returns category
+            coEvery { transactionRepository.create(any()) } returns Result.success(-99)
+            val vm = createViewModel()
+            vm.saveManual(20.0, 900, "家庭菜园", null, TransactionType.EXPENSE)
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.uiState.value is TextInputUiState.Success)
+            coVerify {
+                transactionRepository.create(match {
+                    it.categoryId == 900L && it.categoryName == "家庭菜园" &&
+                        it.categoryIcon == "🪴" && it.categoryColor == "#123ABC"
+                })
+            }
+        }
+    }
 
     // ── Initial state ────────────────────────────────────────────────────
 
@@ -636,7 +749,7 @@ class TextInputViewModelTest {
                 Category(id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE),
                 Category(id = 2, name = "交通", icon = "ic_transport", color = "#2196F3", type = TransactionType.EXPENSE)
             )
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+            every { categoryRepository.observeAllCategories() } returns flowOf(categories)
 
             val vm = createViewModel()
 
@@ -705,7 +818,7 @@ class TextInputViewModelTest {
                 Category(id = 5, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE),
                 Category(id = 10, name = "交通", icon = "ic_transport", color = "#2196F3", type = TransactionType.EXPENSE)
             )
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+            every { categoryRepository.observeAllCategories() } returns flowOf(categories)
 
             val vm = createViewModel()
 
@@ -724,7 +837,7 @@ class TextInputViewModelTest {
             val categories = listOf(
                 Category(id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722", type = TransactionType.EXPENSE)
             )
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+            every { categoryRepository.observeAllCategories() } returns flowOf(categories)
 
             val vm = createViewModel()
 
@@ -795,7 +908,7 @@ class TextInputViewModelTest {
                     sortOrder = 3
                 )
             )
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+            every { categoryRepository.observeAllCategories() } returns flowOf(categories)
 
             val vm = createViewModel()
 

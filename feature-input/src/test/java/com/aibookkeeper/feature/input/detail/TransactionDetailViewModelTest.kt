@@ -9,6 +9,8 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -16,6 +18,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -35,11 +38,14 @@ class TransactionDetailViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val ledgerContext: LedgerContext = mockk()
+    private val ledgerState = MutableStateFlow(LedgerContextState())
     private val now = LocalDateTime.now()
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { ledgerContext.state } returns ledgerState
     }
 
     @AfterEach
@@ -86,12 +92,43 @@ class TransactionDetailViewModelTest {
         transaction: Transaction? = createTransaction(id = transactionId)
     ): TransactionDetailViewModel {
         every { transactionRepository.observeById(transactionId) } returns flowOf(transaction)
-        every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList<Category>())
+        every { categoryRepository.observeAllCategories() } returns flowOf(emptyList<Category>())
         return TransactionDetailViewModel(
             createSavedStateHandle(transactionId),
             transactionRepository,
-            categoryRepository
+            categoryRepository,
+            ledgerContext
         )
+    }
+
+    @Test
+    fun `ledger switch during edit category lookup prevents stale transaction update`() = runTest {
+        val category = CompletableDeferred<Category>()
+        coEvery { categoryRepository.getById(1) } coAnswers { category.await() }
+        val vm = createViewModel()
+        vm.uiState.test {
+            awaitItem()
+            assertTrue(awaitItem() is DetailUiState.Loaded)
+            vm.updateTransaction(25.0, 1, "餐饮", null, now)
+            testDispatcher.scheduler.runCurrent()
+            ledgerState.value = ledgerState.value.copy(selectionVersion = 2)
+            category.complete(Category(1, "餐饮", "ic_food", "#FF5722", TransactionType.EXPENSE))
+            testDispatcher.scheduler.runCurrent()
+
+            coVerify(exactly = 0) { transactionRepository.update(any()) }
+            assertEquals("账本已切换，请重新选择分类", vm.errorMessage.value)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `category creation failure is surfaced without claiming success`() = runTest {
+        coEvery { categoryRepository.create(any()) } returns Result.failure(IllegalStateException("HTTP 403"))
+        val vm = createViewModel()
+        vm.addCategory("云端分类", "🪴")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("HTTP 403", vm.errorMessage.value)
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -211,11 +248,12 @@ class TransactionDetailViewModelTest {
             val txFlow = MutableStateFlow<Transaction?>(createTransaction(id = 1, amount = 35.0))
             every { transactionRepository.observeById(1L) } returns txFlow
 
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+            every { categoryRepository.observeAllCategories() } returns flowOf(emptyList())
             val vm = TransactionDetailViewModel(
                 createSavedStateHandle(1L),
                 transactionRepository,
-                categoryRepository
+                categoryRepository,
+                ledgerContext
             )
 
             vm.uiState.test {
@@ -238,11 +276,12 @@ class TransactionDetailViewModelTest {
             val txFlow = MutableStateFlow<Transaction?>(createTransaction(id = 1))
             every { transactionRepository.observeById(1L) } returns txFlow
 
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+            every { categoryRepository.observeAllCategories() } returns flowOf(emptyList())
             val vm = TransactionDetailViewModel(
                 createSavedStateHandle(1L),
                 transactionRepository,
-                categoryRepository
+                categoryRepository,
+                ledgerContext
             )
 
             vm.uiState.test {
@@ -309,11 +348,12 @@ class TransactionDetailViewModelTest {
         @Test
         fun should_showNotFound_when_invalidTransactionId() = runTest {
             every { transactionRepository.observeById(-1L) } returns flowOf(null)
-            every { categoryRepository.observeExpenseCategories() } returns flowOf(emptyList())
+            every { categoryRepository.observeAllCategories() } returns flowOf(emptyList())
             val vm = TransactionDetailViewModel(
                 SavedStateHandle(emptyMap<String, Any>()),
                 transactionRepository,
-                categoryRepository
+                categoryRepository,
+                ledgerContext
             )
 
             vm.uiState.test {

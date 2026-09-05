@@ -11,3 +11,6 @@ data class Category(
     val sortOrder: Int = 0,
     val children: List<Category> = emptyList()
 )
+
+fun normalizeCategoryName(name: String): String =
+    name.trim().replace(Regex("[\\s\\p{Z}]+"), " ")

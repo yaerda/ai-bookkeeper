@@ -59,6 +59,25 @@ npm run build
 
 项目已配置 GitHub Actions (`.github/workflows/ci.yml`)，push/PR 到 `main` 时自动执行构建和测试。
 
+### 语音与时间排序的发布门槛
+
+CI 和 APK Release 都必须通过语音界面与 Room 回归测试，不能仅以“弹窗能打开”作为语音正常的依据。
+覆盖首页长按、冷启动时先松手、收到识别文字后提交、失败后在弹窗重试、短按取消不录音，以及账单时间相同
+时的稳定排序。新增记录保留记录时刻，选日期或编辑账单不会无意中将时间清零。
+
+`SpeechInputSessionTest` 还覆盖识别中的重复请求、过期回调、就绪/结果超时和空最终回调。
+部分系统语音服务会给出有效的中间识别文字，却返回空的最终结果；应用会保留这些文字并明确提示核对，
+不会自动当作完整结果记账。
+
+具备中文系统识别服务的 Android 13+ 设备还可运行真实 PCM 音频到输入框的回归：
+
+```powershell
+.\gradlew.bat :feature-input:connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.realSpeech=true"
+```
+
+音频夹具是“回归测试，午饭花了三十五元”，前面包含三秒静默。它只打包进测试 APK，不进入发布 APK。
+此设备测试依赖系统识别服务；常规 CI 使用确定性的识别服务替身检查真实 Compose 输入、松手和提交链路。
+
 ## 🛠 技术栈
 
 - **语言**: Kotlin

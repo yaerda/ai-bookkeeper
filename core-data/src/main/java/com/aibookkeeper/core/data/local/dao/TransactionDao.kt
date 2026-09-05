@@ -82,14 +82,14 @@ interface TransactionDao {
     @Query("""
         SELECT * FROM transactions
         WHERE deletedAt IS NULL AND date BETWEEN :startMillis AND :endMillis
-        ORDER BY date DESC
+        ORDER BY date DESC, createdAt DESC, syncId DESC
     """)
     fun observeByDateRange(startMillis: Long, endMillis: Long): Flow<List<TransactionEntity>>
 
     @Query("""
         SELECT * FROM transactions
         WHERE deletedAt IS NULL AND date BETWEEN :startMillis AND :endMillis AND type = :type
-        ORDER BY date DESC
+        ORDER BY date DESC, createdAt DESC, syncId DESC
     """)
     fun observeByDateRangeAndType(
         startMillis: Long, endMillis: Long, type: String
@@ -117,7 +117,7 @@ interface TransactionDao {
             OR (:categoryId IS NULL AND categoryId IS NULL)
           )
           AND date BETWEEN :startMillis AND :endMillis
-        ORDER BY date DESC
+        ORDER BY date DESC, createdAt DESC, syncId DESC
     """)
     fun observeByCategoryAndDateRange(
         categoryId: Long?, startMillis: Long, endMillis: Long
@@ -234,7 +234,7 @@ interface TransactionDao {
         WHERE deletedAt IS NULL
           AND (note LIKE '%' || :keyword || '%'
            OR merchantName LIKE '%' || :keyword || '%')
-        ORDER BY date DESC
+        ORDER BY date DESC, createdAt DESC, syncId DESC
         LIMIT :limit
     """)
     suspend fun search(keyword: String, limit: Int = 50): List<TransactionEntity>

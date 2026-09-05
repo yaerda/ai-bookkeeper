@@ -1,5 +1,6 @@
 package com.aibookkeeper.feature.sync.queue
 
+import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
@@ -11,6 +12,7 @@ import com.aibookkeeper.feature.sync.auth.AuthenticationRequiredException
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.feature.sync.network.PullResponse
 import com.aibookkeeper.feature.sync.network.PushResponse
+import com.aibookkeeper.feature.sync.network.PushRequest
 import com.aibookkeeper.feature.sync.network.SyncApi
 import com.aibookkeeper.feature.sync.network.SyncTransactionDto
 import io.mockk.coEvery
@@ -42,6 +44,7 @@ class CloudSyncManagerTest {
     private val api = mockk<SyncApi>()
     private val tokenProvider = mockk<TokenProvider>()
     private val preferences = mockk<SyncPreferences>()
+    private val categorySync = mockk<LedgerCategorySync>()
     private val json = Json { ignoreUnknownKeys = true }
     private lateinit var manager: CloudSyncManager
 
@@ -89,10 +92,12 @@ class CloudSyncManagerTest {
             api,
             tokenProvider,
             preferences,
-            json
+            json,
+            categorySync
         )
         every { repository.observePendingSyncCount() } returns flowOf(0)
         coEvery { tokenProvider.invalidate() } returns Unit
+        coEvery { categorySync.syncDefault(any()) } returns emptyList()
     }
 
     @Test
@@ -103,6 +108,7 @@ class CloudSyncManagerTest {
 
         assertInstanceOf(AuthenticationRequiredException::class.java, result.exceptionOrNull())
         coVerify(exactly = 0) { repository.getPendingSync() }
+        coVerify(exactly = 0) { categorySync.syncDefault(any()) }
         coVerify(exactly = 0) { api.push(any(), any()) }
     }
 
@@ -124,6 +130,21 @@ class CloudSyncManagerTest {
 
         assertInstanceOf(AccountMismatchException::class.java, result.exceptionOrNull())
         coVerify(exactly = 0) { repository.getPendingSync() }
+        coVerify(exactly = 0) { categorySync.syncDefault(any()) }
+    }
+
+    @Test
+    fun `category synchronization failure stops before uploading or merging transactions`() = runTest {
+        signedIn()
+        coEvery { categorySync.syncDefault(any()) } throws RetryableSyncException("categories unavailable")
+
+        val result = manager.syncNow()
+
+        assertInstanceOf(RetryableSyncException::class.java, result.exceptionOrNull())
+        coVerify(exactly = 0) { repository.getPendingSync() }
+        coVerify(exactly = 0) { repository.mergeRemote(any()) }
+        coVerify(exactly = 0) { api.push(any(), any()) }
+        coVerify(exactly = 0) { api.pull(any(), any(), any()) }
     }
 
     @Test
@@ -149,6 +170,7 @@ class CloudSyncManagerTest {
         assertEquals(1, report.downloaded)
         assertEquals(0, report.conflicts)
         coVerifyOrder {
+            categorySync.syncDefault(any())
             repository.getPendingSync()
             api.push(any(), any())
             repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11)
@@ -173,6 +195,27 @@ class CloudSyncManagerTest {
         assertEquals(0, report.uploaded)
         assertEquals(1, report.conflicts)
         coVerify(exactly = 2) { api.push(any(), any()) }
+    }
+
+    @Test
+    fun `default uploads use cloud category IDs without changing local Room IDs`() = runTest {
+        signedIn()
+        val request = slot<PushRequest>()
+        val cloud = Category(901, "餐饮", "🍜", "#112233", TransactionType.EXPENSE)
+        coEvery { categorySync.syncDefault(any()) } returns listOf(cloud)
+        coEvery { repository.getPendingSync() } returns listOf(local)
+        coEvery { api.push(any(), capture(request)) } returns Response.success(
+            PushResponse(listOf(remote.copy(categoryId = cloud.id)), emptyList())
+        )
+        coEvery { repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11) } returns true
+        emptyPull()
+
+        manager.syncNow().getOrThrow()
+
+        assertEquals(901L, request.captured.transactions.single().categoryId)
+        assertEquals("🍜", request.captured.transactions.single().categoryIcon)
+        assertEquals("#112233", request.captured.transactions.single().categoryColor)
+        assertEquals(2L, local.categoryId)
     }
 
     @Test

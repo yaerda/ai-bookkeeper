@@ -10,6 +10,8 @@ import com.aibookkeeper.core.data.repository.LedgerOption
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.localLedgerOption
 import io.mockk.every
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.time.LocalDateTime
 import java.time.YearMonth
@@ -29,6 +31,28 @@ class ActiveLedgerTransactionRepositoryTest {
 
     private val localRepository = mockk<TransactionRepository>()
     private val session = mockk<SharedLedgerSession>()
+
+    @Test
+    fun `background capture and notification undo remain local while a viewer ledger is selected`() = runTest {
+        val viewer = LedgerOption("shared", "家庭", "", "VIEWER", "FAMILY", false)
+        every { session.state } returns MutableStateFlow(
+            LedgerContextState(isSignedIn = true, ledgers = listOf(viewer), selectedLedgerId = viewer.id)
+        )
+        val captured = transaction(0, 20.0, "本地分类").copy(
+            categoryId = 51, source = TransactionSource.AUTO_CAPTURE
+        )
+        coEvery { localRepository.create(captured) } returns Result.success(99)
+        coEvery { localRepository.getById(99) } returns captured.copy(id = 99)
+        coEvery { localRepository.delete(99) } returns Result.success(Unit)
+        val repository = ActiveLedgerTransactionRepository(localRepository, session)
+
+        assertEquals(99L, repository.create(captured).getOrThrow())
+        repository.delete(99).getOrThrow()
+
+        coVerify(exactly = 0) { session.push(any()) }
+        coVerify { localRepository.create(match { it.categoryId == 51L }) }
+        coVerify { localRepository.delete(99) }
+    }
 
     @Test
     fun `month flow switches from local Room to selected shared ledger`() = runTest {

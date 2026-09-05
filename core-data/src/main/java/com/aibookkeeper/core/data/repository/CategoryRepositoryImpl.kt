@@ -4,6 +4,7 @@ import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.mapper.CategoryMapper
 import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.model.normalizeCategoryName
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -31,8 +32,15 @@ class CategoryRepositoryImpl @Inject constructor(
     override suspend fun getById(id: Long): Category? =
         categoryDao.getById(id)?.let(mapper::toDomain)
 
-    override suspend fun findByNameAndType(name: String, type: TransactionType): Category? =
-        categoryDao.findByNameAndType(name, type.name)?.let(mapper::toDomain)
+    override suspend fun findByNameAndType(name: String, type: TransactionType): Category? {
+        val normalizedName = normalizeCategoryName(name)
+        val entity = categoryDao.findByNameAndType(normalizedName, type.name)
+            ?: categoryDao.getAllOnce().firstOrNull {
+                it.type == type.name &&
+                    normalizeCategoryName(it.name).equals(normalizedName, ignoreCase = true)
+            }
+        return entity?.let(mapper::toDomain)
+    }
 
     override suspend fun create(category: Category): Result<Long> = runCatching {
         categoryDao.insert(mapper.toEntity(category))

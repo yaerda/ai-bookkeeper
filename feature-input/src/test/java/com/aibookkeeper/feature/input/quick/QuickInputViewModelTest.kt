@@ -7,12 +7,16 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.every
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -31,10 +35,13 @@ class QuickInputViewModelTest {
     private val aiExtractionRepository: AiExtractionRepository = mockk()
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
+    private val ledgerContext: LedgerContext = mockk()
+    private val ledgerState = MutableStateFlow(LedgerContextState())
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { ledgerContext.state } returns ledgerState
     }
 
     @AfterEach
@@ -43,7 +50,7 @@ class QuickInputViewModelTest {
     }
 
     private fun createViewModel(): QuickInputViewModel {
-        return QuickInputViewModel(aiExtractionRepository, transactionRepository, categoryRepository)
+        return QuickInputViewModel(aiExtractionRepository, transactionRepository, categoryRepository, ledgerContext)
     }
 
     private fun createExtractionResult(
@@ -62,6 +69,22 @@ class QuickInputViewModelTest {
     )
 
     // ── Initial state ────────────────────────────────────────────────────
+
+    @Nested
+    inner class LedgerIsolation {
+        @Test
+        fun `quick preselection is invalid after ledger generation changes`() = runTest {
+            val vm = createViewModel()
+            vm.setPreselectedCategory("餐饮", "🍚")
+            ledgerState.value = ledgerState.value.copy(selectionVersion = 2)
+            vm.submitCategoryAmount(20.0, "餐饮")
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.uiState.value is QuickInputUiState.Error)
+            coVerify(exactly = 0) { categoryRepository.findByNameAndType(any(), any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+    }
 
     @Nested
     inner class InitialState {

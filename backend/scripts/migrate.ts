@@ -52,10 +52,24 @@ try {
          to ${quotedRuntimeUser}`
     );
     await client.query(
+      `grant select, insert
+         on ledger_category
+         to ${quotedRuntimeUser}`
+    );
+    await client.query(
+      `grant select, insert, update
+         on user_privacy
+         to ${quotedRuntimeUser}`
+    );
+    await client.query(
       `grant usage, select on sequence sync_version_seq
          to ${quotedRuntimeUser}`
     );
-    console.log(`Granted family ledger permissions to ${runtimeUser}`);
+    await client.query(
+      `grant usage, select on sequence ledger_category_id_seq
+         to ${quotedRuntimeUser}`
+    );
+    console.log(`Granted family, category and privacy permissions to ${runtimeUser}`);
   }
 } finally {
   await client.end();

@@ -4,9 +4,12 @@ import com.aibookkeeper.core.data.di.LocalLedger
 import com.aibookkeeper.core.data.model.CategoryExpense
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionStatus
+import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.LedgerSelectionChangedException
+import com.aibookkeeper.core.data.repository.requireEditable
 import java.time.LocalDateTime
 import java.time.YearMonth
 import javax.inject.Inject
@@ -25,15 +28,24 @@ class ActiveLedgerTransactionRepository @Inject constructor(
 ) : TransactionRepository {
 
     override suspend fun create(transaction: Transaction): Result<Long> =
-        if (isLocal()) {
-            localRepository.create(transaction)
-        } else {
-            runCatching { session.push(transaction).id }
+        runCatching {
+            // Capture resolves Room category IDs independently of the selected online ledger.
+            if (transaction.source == TransactionSource.AUTO_CAPTURE) {
+                return@runCatching localRepository.create(transaction).getOrThrow()
+            }
+            val state = session.state.value
+            session.requireEditable(state.selection)
+            if (state.selectedLedger.isLocal) localRepository.create(transaction).getOrThrow()
+            else session.push(transaction).id
         }
 
-    override suspend fun getById(id: Long): Transaction? =
-        if (isLocal()) localRepository.getById(id)
-        else session.remoteTransactions.value.firstOrNull { it.id == id }
+    override suspend fun getById(id: Long): Transaction? {
+        val state = session.state.value
+        val transaction = if (state.selectedLedger.isLocal) localRepository.getById(id)
+        else remoteSnapshot().firstOrNull { it.id == id }
+        if (session.state.value.selection != state.selection) throw LedgerSelectionChangedException()
+        return transaction
+    }
 
     override fun observeById(id: Long): Flow<Transaction?> =
         selectedFlow(
@@ -93,10 +105,12 @@ class ActiveLedgerTransactionRepository @Inject constructor(
     )
 
     override suspend fun update(transaction: Transaction): Result<Unit> =
-        if (isLocal()) {
-            localRepository.update(transaction)
-        } else {
-            runCatching {
+        runCatching {
+            val state = session.state.value
+            session.requireEditable(state.selection)
+            if (state.selectedLedger.isLocal) {
+                localRepository.update(transaction).getOrThrow()
+            } else {
                 session.push(transaction.copy(updatedAt = LocalDateTime.now()))
                 Unit
             }
@@ -116,6 +130,9 @@ class ActiveLedgerTransactionRepository @Inject constructor(
 
     override suspend fun delete(id: Long): Result<Unit> {
         if (isLocal()) return localRepository.delete(id)
+        if (id > 0 && localRepository.getById(id)?.source == TransactionSource.AUTO_CAPTURE) {
+            return localRepository.delete(id)
+        }
         val transaction = getById(id) ?: return Result.failure(
             IllegalArgumentException("账单不存在")
         )
@@ -134,7 +151,7 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         if (isLocal()) {
             localRepository.search(keyword)
         } else {
-            session.remoteTransactions.value.filter { transaction ->
+            remoteSnapshot().filter { transaction ->
                 listOf(
                     transaction.categoryName,
                     transaction.merchantName,
@@ -158,6 +175,8 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         session.state.flatMapLatest { state ->
             if (state.selectedLedger.isLocal) {
                 localRepository.observeExpenseBreakdown(yearMonth)
+            } else if (!state.isSignedIn || state.isLoading || state.errorMessage != null) {
+                flowOf(emptyList())
             } else {
                 remoteExpenseBreakdown(yearMonth)
             }
@@ -198,7 +217,7 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         if (isLocal()) {
             localRepository.getMonthlyExpense(yearMonth)
         } else {
-            session.remoteTransactions.value
+            remoteSnapshot()
                 .filter {
                     it.type == TransactionType.EXPENSE &&
                         YearMonth.from(it.date) == yearMonth
@@ -214,13 +233,22 @@ class ActiveLedgerTransactionRepository @Inject constructor(
             localRepository.getCategoryBreakdownOnce(type, yearMonth)
         } else {
             expenseBreakdown(
-                session.remoteTransactions.value.filter {
+                remoteSnapshot().filter {
                     it.type.name == type && YearMonth.from(it.date) == yearMonth
                 }
             )
         }
 
     private fun isLocal(): Boolean = session.state.value.selectedLedger.isLocal
+
+    private fun remoteSnapshot(): List<Transaction> {
+        val state = session.state.value
+        return if (state.isSignedIn && !state.isLoading && state.errorMessage == null) {
+            session.remoteTransactions.value
+        } else {
+            emptyList()
+        }
+    }
 
     private fun remoteExpenseBreakdown(yearMonth: YearMonth): Flow<List<CategoryExpense>> =
         session.remoteTransactions.map { transactions ->
@@ -263,6 +291,8 @@ class ActiveLedgerTransactionRepository @Inject constructor(
     ): Flow<T> = session.state.flatMapLatest { state ->
         if (state.selectedLedger.isLocal) {
             local()
+        } else if (!state.isSignedIn || state.isLoading || state.errorMessage != null) {
+            flowOf(remote(emptyList()))
         } else {
             session.remoteTransactions.map(remote)
         }

@@ -2,6 +2,7 @@ package com.aibookkeeper.feature.input.home
 
 import android.app.Activity
 import android.content.Intent
+import com.aibookkeeper.core.common.extensions.resolveTransactionDate
 import com.aibookkeeper.core.data.ai.AzureOpenAiPromptBuilder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,10 +12,12 @@ import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.model.newestTransactionFirst
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerOption
+import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
@@ -24,9 +27,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
@@ -126,8 +131,12 @@ class HomeViewModel @Inject constructor(
             todayIncome = todayIncome,
             monthExpense = data.monthExpense,
             monthIncome = data.monthIncome,
-            recentTransactions = data.transactions.take(20),
-            expenseCategories = data.categories,
+            recentTransactions = data.transactions.sortedWith(newestTransactionFirst).take(20),
+            expenseCategories = if (ledgerState.selectedLedger.isLocal || !ledgerState.isLoading) {
+                data.categories
+            } else {
+                emptyList()
+            },
             currentMonth = currentMonth,
             isLoading = ledgerState.isLoading,
             cloudSystemPrompt = AzureOpenAiPromptBuilder.buildBaseSystemPrompt(data.categories.map { it.name }),
@@ -138,7 +147,7 @@ class HomeViewModel @Inject constructor(
             ledgers = ledgerState.ledgers,
             selectedLedgerId = ledgerState.selectedLedgerId,
             selectedLedgerName = ledgerState.selectedLedger.name,
-            canEditSelectedLedger = ledgerState.selectedLedger.canEdit,
+            canEditSelectedLedger = ledgerState.canEdit,
             ledgerErrorMessage = ledgerState.errorMessage
         )
     }.stateIn(
@@ -154,10 +163,12 @@ class HomeViewModel @Inject constructor(
     fun submitAiInput(text: String) {
         if (_aiStatus.value is AiStatus.Processing || _aiStatus.value is AiStatus.Success) return
         _aiStatus.value = AiStatus.Processing
+        val selection = ledgerContext.state.value.selection
 
         viewModelScope.launch {
             try {
-                val categories = categoryRepository.observeExpenseCategories().stateIn(viewModelScope).value
+                ledgerContext.requireEditable(selection)
+                val categories = categoryRepository.observeAllCategories().first()
                 val categoryNames = categories.map { it.name }
 
                 // Split multi-line input into separate entries
@@ -166,14 +177,16 @@ class HomeViewModel @Inject constructor(
                     .filter { it.isNotBlank() && it.length > 1 }
 
                 val results = mutableListOf<String>()
+                var lastError: Exception? = null
                 for (line in lines) {
                     try {
                         val result = aiExtractionRepository.extract(line, categoryNames).getOrThrow()
+                        ledgerContext.requireEditable(selection)
                         val amount = result.amount ?: continue
                         if (amount <= 0) continue
                         val type = if (result.type.equals("income", true)) TransactionType.INCOME else TransactionType.EXPENSE
-                        val matchedCategory = categories.find { it.name == result.category }
-                        val date = try { LocalDate.parse(result.date) } catch (_: Exception) { LocalDate.now() }
+                        val matchedCategory = categories.find { it.name == result.category && it.type == type }
+                        val now = LocalDateTime.now()
 
                         val transaction = Transaction(
                             amount = amount,
@@ -185,25 +198,31 @@ class HomeViewModel @Inject constructor(
                             merchantName = result.merchantName,
                             note = result.note ?: line,
                             originalInput = line,
-                            date = date.atStartOfDay(),
-                            createdAt = LocalDateTime.now(),
-                            updatedAt = LocalDateTime.now(),
+                            date = resolveTransactionDate(result.date, now),
+                            createdAt = now,
+                            updatedAt = now,
                             source = TransactionSource.TEXT_AI,
                             status = TransactionStatus.CONFIRMED,
                             syncStatus = SyncStatus.LOCAL,
                             aiConfidence = result.confidence
                         )
-                        transactionRepository.create(transaction)
+                        ledgerContext.requireEditable(selection)
+                        transactionRepository.create(transaction).getOrThrow()
                         results.add("${result.category} ${amount}元")
-                    } catch (_: Exception) { /* skip failed lines */ }
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        ledgerContext.requireEditable(selection)
+                        lastError = error
+                    }
                 }
 
                 if (results.isNotEmpty()) {
                     _aiStatus.value = AiStatus.Success("已记${results.size}笔：${results.joinToString("、")}")
                 } else {
-                    _aiStatus.value = AiStatus.Error("未识别到有效账单")
+                    _aiStatus.value = AiStatus.Error(lastError?.message ?: "未识别到有效账单")
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 _aiStatus.value = AiStatus.Error(e.message ?: "识别失败")
             }
         }

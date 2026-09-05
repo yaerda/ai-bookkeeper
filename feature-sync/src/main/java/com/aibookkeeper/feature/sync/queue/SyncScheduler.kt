@@ -9,6 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.aibookkeeper.core.data.di.LocalLedger
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.feature.sync.auth.AuthManager
 import com.aibookkeeper.feature.sync.auth.AuthState
@@ -26,13 +27,24 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @Singleton
-class SyncScheduler @Inject constructor(
-    @ApplicationContext context: Context,
+class SyncScheduler internal constructor(
+    private val workManager: WorkManager,
     private val authManager: AuthManager,
-    private val repository: TransactionRepository
+    private val repository: TransactionRepository,
+    private val scope: CoroutineScope
 ) {
-    private val workManager = WorkManager.getInstance(context)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        authManager: AuthManager,
+        @LocalLedger repository: TransactionRepository
+    ) : this(
+        WorkManager.getInstance(context),
+        authManager,
+        repository,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    )
+
     private val started = AtomicBoolean()
     private val networkConstraint = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -42,6 +54,7 @@ class SyncScheduler @Inject constructor(
         if (!started.compareAndSet(false, true)) return
         schedulePeriodic()
         scope.launch {
+            var previousAccountId: String? = null
             combine(
                 authManager.state,
                 repository.observePendingSyncCount()
@@ -50,8 +63,18 @@ class SyncScheduler @Inject constructor(
             }
                 .distinctUntilChanged()
                 .collect { (accountId, pendingCount) ->
-                    if (accountId != null && pendingCount > 0) enqueueImmediate()
+                    val accountChanged = accountId != previousAccountId
+                    previousAccountId = accountId
+                    if (accountId != null && (accountChanged || pendingCount > 0)) enqueueImmediate()
                 }
+        }
+    }
+
+    fun onLocalCategoryCreated() {
+        if (authManager.state.value is AuthState.SignedIn) {
+            // The Room write is already durable; scheduling failure must not make the UI retry it.
+            // Startup/sign-in and periodic sync also import the complete local catalog.
+            runCatching { enqueueImmediate() }
         }
     }
 

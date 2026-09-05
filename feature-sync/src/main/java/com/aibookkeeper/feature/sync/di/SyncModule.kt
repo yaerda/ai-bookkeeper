@@ -3,7 +3,9 @@ package com.aibookkeeper.feature.sync.di
 import com.aibookkeeper.feature.sync.auth.AuthManager
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.feature.sync.ledger.ActiveLedgerCategoryRepository
 import com.aibookkeeper.feature.sync.ledger.ActiveLedgerTransactionRepository
 import com.aibookkeeper.feature.sync.ledger.SharedLedgerSession
 import com.aibookkeeper.feature.sync.queue.CloudSyncManager
@@ -43,6 +45,12 @@ abstract class SyncModule {
     abstract fun bindTransactionRepository(
         impl: ActiveLedgerTransactionRepository
     ): TransactionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindCategoryRepository(
+        impl: ActiveLedgerCategoryRepository
+    ): CategoryRepository
 
     companion object {
         @Provides

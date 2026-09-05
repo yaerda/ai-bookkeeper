@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.aibookkeeper.core.data.local.entity.TransactionEntity
 import com.aibookkeeper.core.data.local.migration.Migrations
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -153,6 +154,25 @@ class TransactionSyncIntegrationTest {
         val stored = dao.getBySyncId(tombstone.syncId)!!
         assertNull(dao.getById(stored.id))
         assertEquals(300L, stored.deletedAt)
+    }
+
+    @Test
+    fun newEntriesAndTimestampTiesUseTheSameChronologyInEveryDetailQuery() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 9_999, serverVersion = 0, note = "chronology")
+        val records = listOf(
+            original.copy(syncId = "old", date = 10_000, createdAt = 100),
+            original.copy(syncId = "a", date = 10_000, createdAt = 200, updatedAt = 200),
+            original.copy(syncId = "b", date = 10_000, createdAt = 200, updatedAt = 200),
+            original.copy(syncId = "backdated", date = 9_000, createdAt = 600),
+            original.copy(syncId = "latest", date = 20_000, createdAt = 600)
+        )
+        records.forEach { dao.insert(it) }
+        val expected = listOf("latest", "b", "a", "old", "backdated")
+        assertEquals(expected, dao.observeByDateRange(0, 30_000).first().map { it.syncId })
+        assertEquals(expected, dao.observeByDateRangeAndType(0, 30_000, "EXPENSE").first().map { it.syncId })
+        assertEquals(expected, dao.observeByCategoryAndDateRange(null, 0, 30_000).first().map { it.syncId })
+        assertEquals(expected, dao.search("chronology").map { it.syncId })
     }
 
     private fun createDatabase(): AppDatabase {

@@ -4,6 +4,24 @@ export type TransactionStatus = 'CONFIRMED' | 'PENDING'
 export type LedgerRole = 'OWNER' | 'EDITOR' | 'VIEWER'
 export type LedgerMode = 'PERSONAL' | 'FAMILY'
 
+export interface LedgerCategory {
+  id: number
+  name: string
+  type: TransactionType
+  icon: string
+  color: string
+  sortOrder: number
+  isSystem: boolean
+}
+
+export interface CategoryDraft {
+  name: string
+  type: TransactionType
+  icon: string
+  color: string
+  sortOrder?: number
+}
+
 export interface Transaction {
   syncId: string
   serverVersion: number

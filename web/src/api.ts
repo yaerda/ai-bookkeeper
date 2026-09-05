@@ -1,5 +1,7 @@
 import { assertCanManageMembers, assertCanPush } from './permissions'
-import type { FamilyInvitation, FamilyLedger, FamilyMember, LedgerMode, LedgerRole, Transaction } from './types'
+import { parsePrivacySettings } from './privacy'
+import type { LegacyPrivacySettings, PrivacySettings, PrivacySettingsUpdate } from './privacy'
+import type { CategoryDraft, FamilyInvitation, FamilyLedger, FamilyMember, LedgerCategory, LedgerMode, LedgerRole, Transaction } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -76,6 +78,44 @@ export class BookkeeperApi {
   async push(transactions: Transaction[], ledgerId?: string | null): Promise<void> {
     assertCanPush(this.roleProvider())
     await this.request('sync/push', { method: 'POST', body: JSON.stringify({ transactions }) }, ledgerId)
+  }
+
+  async getCategories(ledgerId: string): Promise<LedgerCategory[]> {
+    const result = await this.request<{ categories: LedgerCategory[] }>('categories', { cache: 'no-store' }, ledgerId)
+    return result.categories
+  }
+
+  async createCategory(category: CategoryDraft, ledgerId: string): Promise<LedgerCategory> {
+    assertCanPush(this.roleProvider())
+    const result = await this.request<{ category: LedgerCategory }>(
+      'categories',
+      { method: 'POST', body: JSON.stringify(category) },
+      ledgerId,
+    )
+    return result.category
+  }
+
+  async getPrivacySettings(): Promise<PrivacySettings> {
+    return parsePrivacySettings(await this.request<unknown>('privacy/settings', { cache: 'no-store' }))
+  }
+
+  async updatePrivacySettings(settings: PrivacySettingsUpdate): Promise<PrivacySettings> {
+    return parsePrivacySettings(await this.request<unknown>('privacy/settings', { method: 'PATCH', body: JSON.stringify(settings) }))
+  }
+
+  async migratePrivacySettings(settings: LegacyPrivacySettings): Promise<PrivacySettings> {
+    return parsePrivacySettings(await this.request<unknown>('privacy/migrate', { method: 'POST', body: JSON.stringify(settings) }))
+  }
+
+  async verifyPrivacyPasscode(passcode: string, version: number) {
+    const result = await this.request<{ verified: boolean; version: number }>(
+      'privacy/verify',
+      { method: 'POST', body: JSON.stringify({ passcode, version }) },
+    )
+    if (result.verified !== true || result.version !== version) {
+      throw new Error('口令设置已变化，请刷新后重试')
+    }
+    return result
   }
 
   getLedgers() {

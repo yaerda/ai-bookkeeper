@@ -1,5 +1,7 @@
 package com.aibookkeeper.feature.input.quick
 
+import com.aibookkeeper.core.common.extensions.resolveTransactionDate
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aibookkeeper.core.data.model.ExtractionResult
@@ -10,12 +12,16 @@ import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerSelection
+import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.LocalDateTime
 import javax.inject.Inject
@@ -61,7 +67,8 @@ sealed interface QuickInputUiState {
 class QuickInputViewModel @Inject constructor(
     private val aiExtractionRepository: AiExtractionRepository,
     private val transactionRepository: TransactionRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val ledgerContext: LedgerContext
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<QuickInputUiState>(QuickInputUiState.Idle())
@@ -70,6 +77,8 @@ class QuickInputViewModel @Inject constructor(
     private var lastExtractionResult: ExtractionResult? = null
     private var preselectedCategory: String? = null
     private var preselectedCategoryIcon: String? = null
+    private var preselectedSelection: LedgerSelection? = null
+    private var extractionSelection: LedgerSelection? = null
 
     /**
      * Set preselected category (from notification category button).
@@ -77,6 +86,7 @@ class QuickInputViewModel @Inject constructor(
     fun setPreselectedCategory(name: String?, icon: String?) {
         preselectedCategory = name
         preselectedCategoryIcon = icon
+        preselectedSelection = ledgerContext.state.value.selection
         _uiState.value = QuickInputUiState.Idle(
             preselectedCategory = name,
             preselectedCategoryIcon = icon
@@ -92,11 +102,18 @@ class QuickInputViewModel @Inject constructor(
             return
         }
 
+        val selection = ledgerContext.state.value.selection
         viewModelScope.launch {
             _uiState.value = QuickInputUiState.Extracting
-            aiExtractionRepository.extract(input)
+            runCatching {
+                ledgerContext.requireEditable(selection)
+                val result = aiExtractionRepository.extract(input).getOrThrow()
+                ledgerContext.requireEditable(selection)
+                result
+            }
                 .onSuccess { result ->
                     lastExtractionResult = result
+                    extractionSelection = selection
                     _uiState.value = QuickInputUiState.Preview(
                         amount = result.amount ?: 0.0,
                         category = result.category,
@@ -107,9 +124,7 @@ class QuickInputViewModel @Inject constructor(
                     )
                 }
                 .onFailure { error ->
-                    _uiState.value = QuickInputUiState.Error(
-                        error.message ?: "AI 提取失败，请重试"
-                    )
+                    showError(error, "AI 提取失败，请重试")
                 }
         }
     }
@@ -120,24 +135,31 @@ class QuickInputViewModel @Inject constructor(
     fun submitCategoryAmount(amount: Double, categoryName: String) {
         if (_uiState.value !is QuickInputUiState.Idle) return
         _uiState.value = QuickInputUiState.Saving
+        val selection = preselectedSelection ?: ledgerContext.state.value.selection
 
         viewModelScope.launch {
-            val now = LocalDateTime.now()
-            val category = categoryRepository.findByNameAndType(categoryName, TransactionType.EXPENSE)
-            val transaction = Transaction(
-                amount = amount,
-                type = TransactionType.EXPENSE,
-                categoryId = category?.id,
-                categoryName = categoryName,
-                date = now,
-                createdAt = now,
-                updatedAt = now,
-                source = TransactionSource.NOTIFICATION_QUICK,
-                status = TransactionStatus.CONFIRMED,
-                syncStatus = SyncStatus.LOCAL,
-                originalInput = "快捷分类: $categoryName ¥${"%.2f".format(amount)}"
-            )
-            transactionRepository.create(transaction)
+            runCatching {
+                ledgerContext.requireEditable(selection)
+                val now = LocalDateTime.now()
+                val category = categoryRepository.findByNameAndType(categoryName, TransactionType.EXPENSE)
+                val transaction = Transaction(
+                    amount = amount,
+                    type = TransactionType.EXPENSE,
+                    categoryId = category?.id,
+                    categoryName = category?.name ?: categoryName,
+                    categoryIcon = category?.icon,
+                    categoryColor = category?.color,
+                    date = now,
+                    createdAt = now,
+                    updatedAt = now,
+                    source = TransactionSource.NOTIFICATION_QUICK,
+                    status = TransactionStatus.CONFIRMED,
+                    syncStatus = SyncStatus.LOCAL,
+                    originalInput = "快捷分类: $categoryName ¥${"%.2f".format(amount)}"
+                )
+                ledgerContext.requireEditable(selection)
+                transactionRepository.create(transaction).getOrThrow()
+            }
                 .onSuccess { id ->
                     _uiState.value = QuickInputUiState.Success(
                         transactionId = id,
@@ -146,9 +168,7 @@ class QuickInputViewModel @Inject constructor(
                     )
                 }
                 .onFailure { error ->
-                    _uiState.value = QuickInputUiState.Error(
-                        error.message ?: "保存失败"
-                    )
+                    showError(error, "保存失败")
                 }
         }
     }
@@ -159,45 +179,44 @@ class QuickInputViewModel @Inject constructor(
     fun confirmSave() {
         val preview = _uiState.value as? QuickInputUiState.Preview ?: return
         val extraction = lastExtractionResult ?: return
+        val selection = extractionSelection ?: return
         _uiState.value = QuickInputUiState.Saving
 
         viewModelScope.launch {
-            val now = LocalDateTime.now()
-            val txType = when (extraction.type.uppercase()) {
-                "INCOME" -> TransactionType.INCOME
-                else -> TransactionType.EXPENSE
+            runCatching {
+                ledgerContext.requireEditable(selection)
+                val now = LocalDateTime.now()
+                val txType = when (extraction.type.uppercase()) {
+                    "INCOME" -> TransactionType.INCOME
+                    else -> TransactionType.EXPENSE
+                }
+                val category = categoryRepository.findByNameAndType(extraction.category, txType)
+                val txDate = resolveTransactionDate(extraction.date, now)
+                val transaction = Transaction(
+                    amount = preview.amount,
+                    type = txType,
+                    categoryId = category?.id,
+                    categoryName = category?.name ?: extraction.category,
+                    categoryIcon = category?.icon,
+                    categoryColor = category?.color,
+                    merchantName = extraction.merchantName,
+                    note = extraction.note,
+                    originalInput = preview.originalInput,
+                    date = txDate,
+                    createdAt = now,
+                    updatedAt = now,
+                    source = TransactionSource.NOTIFICATION_QUICK,
+                    status = if (extraction.confidence >= 0.7f) {
+                        TransactionStatus.CONFIRMED
+                    } else {
+                        TransactionStatus.PENDING
+                    },
+                    syncStatus = SyncStatus.LOCAL,
+                    aiConfidence = extraction.confidence
+                )
+                ledgerContext.requireEditable(selection)
+                transactionRepository.create(transaction).getOrThrow()
             }
-            val category = categoryRepository.findByNameAndType(
-                extraction.category, txType
-            )
-            val txDate = try {
-                LocalDate.parse(extraction.date).atStartOfDay()
-            } catch (_: Exception) {
-                now
-            }
-
-            val transaction = Transaction(
-                amount = preview.amount,
-                type = txType,
-                categoryId = category?.id,
-                categoryName = extraction.category,
-                merchantName = extraction.merchantName,
-                note = extraction.note,
-                originalInput = preview.originalInput,
-                date = txDate,
-                createdAt = now,
-                updatedAt = now,
-                source = TransactionSource.NOTIFICATION_QUICK,
-                status = if (extraction.confidence >= 0.7f) {
-                    TransactionStatus.CONFIRMED
-                } else {
-                    TransactionStatus.PENDING
-                },
-                syncStatus = SyncStatus.LOCAL,
-                aiConfidence = extraction.confidence
-            )
-
-            transactionRepository.create(transaction)
                 .onSuccess { id ->
                     _uiState.value = QuickInputUiState.Success(
                         transactionId = id,
@@ -206,9 +225,7 @@ class QuickInputViewModel @Inject constructor(
                     )
                 }
                 .onFailure { error ->
-                    _uiState.value = QuickInputUiState.Error(
-                        error.message ?: "保存失败"
-                    )
+                    showError(error, "保存失败")
                 }
         }
     }
@@ -219,8 +236,10 @@ class QuickInputViewModel @Inject constructor(
     fun resetToIdle() {
         preselectedCategory = null
         preselectedCategoryIcon = null
+        preselectedSelection = null
         _uiState.value = QuickInputUiState.Idle()
         lastExtractionResult = null
+        extractionSelection = null
     }
 
     fun resetAfterSave() {
@@ -229,5 +248,11 @@ class QuickInputViewModel @Inject constructor(
             preselectedCategoryIcon = preselectedCategoryIcon
         )
         lastExtractionResult = null
+        extractionSelection = null
+    }
+
+    private fun showError(error: Throwable, fallback: String) {
+        if (error is CancellationException) throw error
+        _uiState.value = QuickInputUiState.Error(error.message ?: fallback)
     }
 }

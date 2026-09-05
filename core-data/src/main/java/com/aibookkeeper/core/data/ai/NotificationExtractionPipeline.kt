@@ -1,7 +1,8 @@
 package com.aibookkeeper.core.data.ai
 
 import android.util.Log
-import com.aibookkeeper.core.common.extensions.toEpochMillis
+import com.aibookkeeper.core.common.extensions.resolveTransactionDate
+import com.aibookkeeper.core.data.di.LocalLedger
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.entity.TransactionEntity
 import com.aibookkeeper.core.data.model.ExtractionResult
@@ -22,7 +23,7 @@ import javax.inject.Inject
 class NotificationExtractionPipeline @Inject constructor(
     private val strategyManager: ExtractionStrategyManager,
     private val rawEventRepository: RawEventRepository,
-    private val transactionRepository: TransactionRepository,
+    @LocalLedger private val transactionRepository: TransactionRepository,
     private val categoryDao: CategoryDao,
     private val extractionCategoryProvider: ExtractionCategoryProvider
 ) {
@@ -65,12 +66,8 @@ class NotificationExtractionPipeline @Inject constructor(
         val categoryId = resolveCategoryId(data)
 
         // 4. Create transaction
-        val now = System.currentTimeMillis()
-        val parsedDate = try {
-            LocalDate.parse(data.date).atStartOfDay().toEpochMillis()
-        } catch (e: Exception) {
-            now
-        }
+        val now = LocalDateTime.now()
+        val parsedDate = resolveTransactionDate(data.date, now)
 
         val txResult = transactionRepository.create(
             com.aibookkeeper.core.data.model.Transaction(
@@ -80,13 +77,9 @@ class NotificationExtractionPipeline @Inject constructor(
                 merchantName = data.merchantName,
                 note = data.note,
                 originalInput = content,
-                date = parsedDate.let {
-                    java.time.Instant.ofEpochMilli(it)
-                        .atZone(java.time.ZoneId.systemDefault())
-                        .toLocalDateTime()
-                },
-                createdAt = LocalDateTime.now(),
-                updatedAt = LocalDateTime.now(),
+                date = parsedDate,
+                createdAt = now,
+                updatedAt = now,
                 source = com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE,
                 status = if (data.confidence >= 0.7f)
                     TransactionStatus.CONFIRMED
@@ -124,11 +117,7 @@ class NotificationExtractionPipeline @Inject constructor(
                 val data = result.getOrThrow()
                 val categoryId = resolveCategoryId(data)
                 val now = LocalDateTime.now()
-                val parsedDate = try {
-                    LocalDate.parse(data.date).atStartOfDay()
-                } catch (e: Exception) {
-                    now
-                }
+                val parsedDate = resolveTransactionDate(data.date, now)
 
                 val txResult = transactionRepository.create(
                     com.aibookkeeper.core.data.model.Transaction(

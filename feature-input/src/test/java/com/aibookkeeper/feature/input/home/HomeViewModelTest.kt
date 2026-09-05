@@ -84,6 +84,7 @@ class HomeViewModelTest {
         every { transactionRepository.observeMonthlyIncome(any()) } returns flowOf(monthIncome)
         every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
         every { categoryRepository.observeExpenseCategories() } returns flowOf(categories)
+        every { categoryRepository.observeAllCategories() } returns flowOf(categories)
 
         return HomeViewModel(
             transactionRepository,
@@ -314,6 +315,9 @@ class HomeViewModelTest {
             assertEquals(TransactionSource.TEXT_AI, savedTransaction.captured.source)
             assertEquals(0.62f, savedTransaction.captured.aiConfidence)
             assertEquals("午饭20", savedTransaction.captured.originalInput)
+            assertEquals(LocalDate.parse(extraction.date), savedTransaction.captured.date.toLocalDate())
+            assertEquals(savedTransaction.captured.createdAt.toLocalTime(), savedTransaction.captured.date.toLocalTime())
+            assertEquals(savedTransaction.captured.createdAt, savedTransaction.captured.updatedAt)
         }
 
         @Test
@@ -347,6 +351,20 @@ class HomeViewModelTest {
 
     @Nested
     inner class DataLoading {
+
+        @Test
+        fun should_showNewestFirst_evenWhenRepositoryReturnsUnsortedRecords() = runTest {
+            val vm = createViewModel(transactions = listOf(
+                createTransaction(id = 1, date = now.minusHours(1)),
+                createTransaction(id = 2, date = now),
+                createTransaction(id = 3, date = now.minusDays(1))
+            ))
+            vm.uiState.test {
+                awaitItem()
+                assertEquals(listOf(2L, 1L, 3L), awaitItem().recentTransactions.map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
         @Test
         fun should_showMonthlyExpense_when_dataLoaded() = runTest {

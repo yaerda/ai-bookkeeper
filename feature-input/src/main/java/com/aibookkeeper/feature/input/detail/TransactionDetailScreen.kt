@@ -1,5 +1,9 @@
 package com.aibookkeeper.feature.input.detail
 
+import com.aibookkeeper.core.common.extensions.toDatePickerDate
+import com.aibookkeeper.core.common.extensions.toDatePickerMillis
+
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,12 +49,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +84,15 @@ fun TransactionDetailScreen(
     viewModel: TransactionDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearError()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -150,7 +165,8 @@ fun TransactionDetailScreen(
                 val categories by viewModel.categories.collectAsStateWithLifecycle()
                 TransactionDetailContent(
                     transaction = state.transaction,
-                    categories = categories,
+                    categories = categories.filter { it.type == state.transaction.type },
+                    canEdit = ledgerState.canEdit,
                     onDelete = {
                         viewModel.deleteTransaction { navController.popBackStack() }
                     },
@@ -173,6 +189,7 @@ private fun TransactionDetailContent(
     onDelete: () -> Unit,
     onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime) -> Unit,
     onAddCategory: (String, String) -> Unit,
+    canEdit: Boolean,
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -188,7 +205,7 @@ private fun TransactionDetailContent(
     var editDate by remember(transaction.id) { mutableStateOf(transaction.date) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    if (showDeleteDialog) {
+    if (showDeleteDialog && canEdit) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("确认删除") },
@@ -284,7 +301,7 @@ private fun TransactionDetailContent(
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                if (isEditing) {
+                if (isEditing && canEdit) {
                     // Amount (numeric keyboard)
                     OutlinedTextField(
                         value = editAmount,
@@ -428,17 +445,14 @@ private fun TransactionDetailContent(
                     // DatePicker dialog
                     if (showDatePicker) {
                         val datePickerState = rememberDatePickerState(
-                            initialSelectedDateMillis = editDate.toLocalDate()
-                                .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            initialSelectedDateMillis = editDate.toLocalDate().toDatePickerMillis()
                         )
                         DatePickerDialog(
                             onDismissRequest = { showDatePicker = false },
                             confirmButton = {
                                 TextButton(onClick = {
                                     datePickerState.selectedDateMillis?.let { millis ->
-                                        val ld = java.time.Instant.ofEpochMilli(millis)
-                                            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                                        editDate = ld.atStartOfDay()
+                                        editDate = millis.toDatePickerDate().atTime(editDate.toLocalTime())
                                     }
                                     showDatePicker = false
                                 }) { Text("确定") }
@@ -495,6 +509,7 @@ private fun TransactionDetailContent(
             Button(
                 onClick = { isEditing = true },
                 modifier = Modifier.fillMaxWidth(),
+                enabled = canEdit,
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -508,6 +523,7 @@ private fun TransactionDetailContent(
         Button(
             onClick = { showDeleteDialog = true },
             modifier = Modifier.fillMaxWidth(),
+            enabled = canEdit,
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer

@@ -1,5 +1,7 @@
 package com.aibookkeeper.feature.capture.ocr
 
+import com.aibookkeeper.core.common.extensions.resolveTransactionDate
+
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.SyncStatus
@@ -40,11 +42,7 @@ class TransactionSaver(
         val categoryId = categoryDao.findByNameAndType(data.category, type.name)?.id
             ?: categoryDao.findByNameAndType("其他", type.name)?.id
         val now = LocalDateTime.now()
-        val parsedDate = try {
-            LocalDate.parse(overrideDate ?: data.date).atStartOfDay()
-        } catch (_: Exception) {
-            now
-        }
+        val parsedDate = resolveTransactionDate(overrideDate ?: data.date, now)
         val amount = Math.abs(data.amount ?: 0.0)
 
         if (amount == 0.0) return -1L

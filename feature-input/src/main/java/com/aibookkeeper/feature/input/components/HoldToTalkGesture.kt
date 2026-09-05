@@ -4,18 +4,11 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import androidx.compose.ui.input.pointer.PointerInputChange
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
@@ -23,14 +16,12 @@ internal fun Modifier.holdToTalkGesture(
     isRecording: Boolean,
     isProcessing: Boolean,
     hasSubmitContent: Boolean,
-    onVoiceToggle: () -> Unit,
-    onHoldReleased: () -> Unit = {},
-    onHoldCancelled: () -> Unit = {},
+    onHoldStarted: () -> Unit,
+    onHoldReleased: () -> Unit,
+    onHoldCancelled: () -> Unit,
     onSubmit: () -> Unit
 ): Modifier {
-    val scope = rememberCoroutineScope()
-    var stopRecordingJob by remember { mutableStateOf<Job?>(null) }
-    val currentOnVoiceToggle by rememberUpdatedState(onVoiceToggle)
+    val currentOnHoldStarted by rememberUpdatedState(onHoldStarted)
     val currentOnHoldReleased by rememberUpdatedState(onHoldReleased)
     val currentOnHoldCancelled by rememberUpdatedState(onHoldCancelled)
     val currentOnSubmit by rememberUpdatedState(onSubmit)
@@ -38,50 +29,44 @@ internal fun Modifier.holdToTalkGesture(
     val currentIsProcessing by rememberUpdatedState(isProcessing)
     val currentHasSubmitContent by rememberUpdatedState(hasSubmitContent)
 
-    fun scheduleStop() {
-        stopRecordingJob?.cancel()
-        stopRecordingJob = scope.launch {
-            delay(RELEASE_GRACE_MILLIS)
-            if (currentIsRecording) currentOnVoiceToggle()
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { stopRecordingJob?.cancel() }
-    }
-
     return pointerInput(Unit) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             down.consume()
-            stopRecordingJob?.cancel()
-            stopRecordingJob = null
-
+            val recordingAtDown = currentIsRecording
+            if (recordingAtDown) currentOnHoldStarted()
             val upBeforeLongPress =
                 withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                    waitForUpOrCancellation()
+                    ReleaseResult(waitForUpOrCancellation())
                 }
             if (upBeforeLongPress != null) {
-                upBeforeLongPress.consume()
-                when {
-                    currentIsRecording -> scheduleStop()
-                    currentHasSubmitContent && !currentIsProcessing -> currentOnSubmit()
-                }
-            } else {
-                if (!currentIsProcessing && !currentIsRecording) {
-                    currentOnVoiceToggle()
-                }
-                val release = waitForUpOrCancellation()
+                val release = upBeforeLongPress.change
                 if (release != null) {
                     release.consume()
-                    currentOnHoldReleased()
-                } else {
+                    when {
+                        recordingAtDown || currentIsRecording -> currentOnHoldReleased()
+                        currentHasSubmitContent && !currentIsProcessing -> currentOnSubmit()
+                    }
+                } else if (recordingAtDown) {
                     currentOnHoldCancelled()
                 }
-                scheduleStop()
+            } else if (recordingAtDown || !currentIsProcessing) {
+                var released = false
+                try {
+                    if (!recordingAtDown && !currentIsRecording) currentOnHoldStarted()
+                    val release = waitForUpOrCancellation()
+                    if (release != null) {
+                        release.consume()
+                        released = true
+                        currentOnHoldReleased()
+                    }
+                } finally {
+                    if (!released) currentOnHoldCancelled()
+                }
             }
         }
     }
 }
 
-private const val RELEASE_GRACE_MILLIS = 1_000L
+// A cancelled early gesture is different from reaching the long-press timeout.
+private data class ReleaseResult(val change: PointerInputChange?)

@@ -31,6 +31,7 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
+    @LocalLedger
     abstract fun bindCategoryRepository(
         impl: CategoryRepositoryImpl
     ): CategoryRepository

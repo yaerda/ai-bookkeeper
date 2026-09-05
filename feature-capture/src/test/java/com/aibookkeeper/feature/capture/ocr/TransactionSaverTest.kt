@@ -166,6 +166,17 @@ class TransactionSaverTest {
         }
 
         @Test
+        fun `date-only capture keeps the recording time and selected date`() = runTest {
+            val txSlot = slot<Transaction>()
+            coEvery { transactionRepository.create(capture(txSlot)) } returns Result.success(7L)
+
+            saver.saveOne(makeItem(date = "2026-08-31"))
+
+            assertEquals(java.time.LocalDate.of(2026, 8, 31), txSlot.captured.date.toLocalDate())
+            assertEquals(txSlot.captured.createdAt.toLocalTime(), txSlot.captured.date.toLocalTime())
+        }
+
+        @Test
         fun `should return -1 when repository create fails`() = runTest {
             coEvery { transactionRepository.create(any()) } returns Result.failure(RuntimeException("DB error"))
 

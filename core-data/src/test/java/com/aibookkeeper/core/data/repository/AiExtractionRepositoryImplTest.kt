@@ -1,6 +1,6 @@
 package com.aibookkeeper.core.data.repository
 
-import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
+import com.aibookkeeper.core.data.ai.ActiveExtractionCategoryProvider
 import com.aibookkeeper.core.data.ai.ExtractionStrategyManager
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 class AiExtractionRepositoryImplTest {
 
     private lateinit var strategyManager: ExtractionStrategyManager
-    private lateinit var extractionCategoryProvider: ExtractionCategoryProvider
+    private lateinit var extractionCategoryProvider: ActiveExtractionCategoryProvider
     private lateinit var repository: AiExtractionRepositoryImpl
 
     private val sampleResult = ExtractionResult(

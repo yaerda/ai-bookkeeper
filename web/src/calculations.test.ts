@@ -63,6 +63,14 @@ describe('bookkeeping calculations', () => {
     expect(groups[1].expense).toBe(20)
   })
 
+  it('does not move an edited older entry ahead of a newer entry with the same timestamp', () => {
+    const groups = groupTransactionsByDate([
+      transaction({ syncId: 'older', createdAt: 10, updatedAt: 1000 }),
+      transaction({ syncId: 'newer', createdAt: 20, updatedAt: 20 }),
+    ])
+    expect(groups[0].transactions.map((item) => item.syncId)).toEqual(['newer', 'older'])
+  })
+
   it('totals expenses by month and formats compact amounts', () => {
     const expenses = calculateMonthlyExpenses([
       transaction({ amount: 300 }),

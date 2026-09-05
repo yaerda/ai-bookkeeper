@@ -11,6 +11,7 @@ import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.sync.auth.AuthenticationRequiredException
 import com.aibookkeeper.feature.sync.auth.TokenProvider
+import com.aibookkeeper.feature.sync.ledger.withCatalog
 import com.aibookkeeper.feature.sync.network.PullResponse
 import com.aibookkeeper.feature.sync.network.PushRequest
 import com.aibookkeeper.feature.sync.network.PushResponse
@@ -61,7 +62,8 @@ class CloudSyncManager @Inject constructor(
     private val api: SyncApi,
     private val tokenProvider: TokenProvider,
     private val preferences: SyncPreferences,
-    private val json: Json
+    private val json: Json,
+    private val categorySync: LedgerCategorySync
 ) : SyncManager {
 
     private val mutex = Mutex()
@@ -76,9 +78,11 @@ class CloudSyncManager @Inject constructor(
                 throw AccountMismatchException()
             }
 
+            val catalog = categorySync.syncDefault(token)
+
             val firstUpload = uploadPending(
                 token.value,
-                repository.getPendingSync()
+                repository.getPendingSync().map { it.withCatalog(catalog) }
             )
             var uploaded = firstUpload.uploaded
             var unresolvedConflictIds = firstUpload.conflictIds
@@ -86,6 +90,7 @@ class CloudSyncManager @Inject constructor(
             if (unresolvedConflictIds.isNotEmpty()) {
                 val retryItems = repository.getPendingSync()
                     .filter { it.syncId in unresolvedConflictIds }
+                    .map { it.withCatalog(catalog) }
                 val retry = uploadPending(token.value, retryItems)
                 uploaded += retry.uploaded
                 unresolvedConflictIds = retry.conflictIds
@@ -243,7 +248,7 @@ class CloudSyncManager @Inject constructor(
     }
 }
 
-private fun retrofit2.Response<*>.toSyncException(operation: String): Exception =
+internal fun retrofit2.Response<*>.toSyncException(operation: String): Exception =
     if (code() == 408 || code() == 429 || code() in 500..599) {
         RetryableSyncException("$operation 暂时失败：HTTP ${code()}")
     } else {
