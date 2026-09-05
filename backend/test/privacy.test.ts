@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  HttpRequest,
+import azureFunctions, {
   type HttpResponseInit,
   type InvocationContext
 } from "@azure/functions";
@@ -23,6 +22,8 @@ import {
   browserCredential,
   PrivacyTestDatabase
 } from "./privacyTestSupport.js";
+
+const { HttpRequest } = azureFunctions;
 
 const off = { requireOnLogin: false, requireForIncome: false };
 const settingsInput = { ...off, version: 0 };

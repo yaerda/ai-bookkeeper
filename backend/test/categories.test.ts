@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { HttpRequest, type InvocationContext } from "@azure/functions";
+import azureFunctions, { type InvocationContext } from "@azure/functions";
 import type { PoolClient, QueryResult } from "pg";
 import { createCategoryHandlers } from "../src/functions/categories.js";
 import type { AuthenticatedUser } from "../src/shared/auth.js";
@@ -19,6 +19,8 @@ import {
   listCategories
 } from "../src/shared/categoryService.js";
 import { LedgerAccessDeniedError, type LedgerRole } from "../src/shared/ledgerAccess.js";
+
+const { HttpRequest } = azureFunctions;
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const editorId = "22222222-2222-4222-8222-222222222222";
