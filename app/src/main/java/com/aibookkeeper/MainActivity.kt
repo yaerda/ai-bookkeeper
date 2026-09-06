@@ -1,7 +1,9 @@
 package com.aibookkeeper
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +16,7 @@ import com.aibookkeeper.core.common.permission.NotificationPermissionHelper
 import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.capture.screenshot.ShareImageReceiverActivity
 import com.aibookkeeper.navigation.AppNavHost
+import com.aibookkeeper.ui.theme.BookkeeperTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -25,13 +28,14 @@ class MainActivity : ComponentActivity() {
         // Keep system splash on screen until Compose splash is rendered
         splashScreen.setKeepOnScreenCondition { !isComposeReady }
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        val lightBars = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+        enableEdgeToEdge(statusBarStyle = lightBars, navigationBarStyle = lightBars)
         val sharedImageUri = intent?.getStringExtra(ShareImageReceiverActivity.EXTRA_SHARED_IMAGE_URI)
 
         setContent {
             // Signal that Compose is ready after first frame
             LaunchedEffect(Unit) { isComposeReady = true }
-            MaterialTheme {
+            BookkeeperTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

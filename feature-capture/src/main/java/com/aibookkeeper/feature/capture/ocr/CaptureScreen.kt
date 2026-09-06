@@ -836,7 +836,7 @@ fun CaptureScreen(
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = if (item.type == "INCOME")
-                                                Color(0xFF4CAF50)
+                                                MaterialTheme.colorScheme.secondary
                                             else MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(

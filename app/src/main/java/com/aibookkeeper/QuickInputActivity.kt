@@ -5,12 +5,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aibookkeeper.feature.capture.notification.NotificationConstants
 import com.aibookkeeper.feature.input.quick.QuickInputSheet
 import com.aibookkeeper.feature.input.quick.QuickInputViewModel
+import com.aibookkeeper.ui.theme.BookkeeperTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
@@ -47,7 +47,7 @@ class QuickInputActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            BookkeeperTheme {
                 val viewModel: QuickInputViewModel = hiltViewModel()
 
                 // Pre-select category if launched from a category button

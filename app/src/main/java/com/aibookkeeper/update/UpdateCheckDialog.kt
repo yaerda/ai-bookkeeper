@@ -1,15 +1,18 @@
 package com.aibookkeeper.update
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -28,9 +31,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aibookkeeper.BuildConfig
 import com.aibookkeeper.core.common.changelog.CHANGELOG
 import com.aibookkeeper.core.data.security.SecureConfigStore
+import com.aibookkeeper.core.data.update.ApkDownloadEvent
+import com.aibookkeeper.core.data.update.ApkDownloadPhase
+import com.aibookkeeper.core.data.update.ApkDownloadProgress
+import com.aibookkeeper.core.data.update.ApkDownloader
 import com.aibookkeeper.core.data.update.ReleaseInfo
 import com.aibookkeeper.core.data.update.UpdateChecker
 import dagger.hilt.EntryPoint
@@ -38,11 +47,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -63,22 +71,41 @@ fun UpdateCheckEffect() {
     var showDialog by remember { mutableStateOf(false) }
     var downloadedApk by remember { mutableStateOf<File?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<ApkDownloadProgress?>(null) }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
     var downloadError by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val downloader = remember { ApkDownloader() }
     val installPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         val apk = downloadedApk
-        if (apk != null && canInstallPackages(context)) {
-            launchPackageInstaller(context, apk)
-            showDialog = false
+        if (apk == null || !apk.exists()) {
+            downloadedApk = null
+            progress = null
+            downloadError = "更新包已失效，请重新下载"
+        } else if (canInstallPackages(context)) {
+            try {
+                launchPackageInstaller(context, apk)
+                showDialog = false
+            } catch (_: ActivityNotFoundException) {
+                downloadError = "找不到系统安装程序"
+            } catch (_: SecurityException) {
+                downloadError = "系统未允许安装，请检查安装权限"
+            }
         } else {
             downloadError = "需要允许安装未知应用，授权后请再次点击安装"
         }
     }
 
     LaunchedEffect(configStore) {
-        val info = UpdateChecker.checkForUpdate(BuildConfig.VERSION_NAME) ?: return@LaunchedEffect
+        val info = try {
+            UpdateChecker.checkForUpdate(BuildConfig.VERSION_NAME) ?: return@LaunchedEffect
+        } catch (error: IOException) {
+            Log.w("UpdateCheck", "无法检查新版本", error)
+            return@LaunchedEffect
+        }
         if (info.version == configStore.getIgnoredUpdateVersion()) return@LaunchedEffect
 
         releaseInfo = info
@@ -90,27 +117,29 @@ fun UpdateCheckEffect() {
         val changelogEntry = CHANGELOG.firstOrNull { it.version == info.version }
 
         AlertDialog(
-            onDismissRequest = { showDialog = false },
+            onDismissRequest = { if (!isDownloading) showDialog = false },
             title = { Text("发现新版本 v${info.version}") },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    if (changelogEntry != null) {
-                        Text(
-                            "更新内容：",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        changelogEntry.highlights.forEach { highlight ->
+                Column {
+                    Column(modifier = Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                        if (changelogEntry != null) {
                             Text(
-                                text = highlight,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier
+                                "更新内容：",
+                                style = MaterialTheme.typography.titleSmall
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            changelogEntry.highlights.forEach { highlight ->
+                                Text(highlight, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else if (info.body.isNotBlank()) {
+                            Text(info.body.take(500))
+                        } else {
+                            Text("新版本已发布，建议更新以获得最新功能和修复。")
                         }
-                    } else if (info.body.isNotBlank()) {
-                        Text(info.body.take(500))
-                    } else {
-                        Text("新版本已发布，建议更新以获得最新功能和修复。")
+                    }
+                    progress?.let {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        UpdateDownloadProgress(it)
                     }
                     if (downloadError.isNotBlank()) {
                         Spacer(modifier = Modifier.height(12.dp))
@@ -121,22 +150,52 @@ fun UpdateCheckEffect() {
             confirmButton = {
                 Button(
                     enabled = !isDownloading,
-                    onClick = {
+                    onClick = download@{
+                        if (isDownloading) return@download
                         val existingApk = downloadedApk
                         if (existingApk != null && existingApk.exists()) {
-                            requestInstall(context, existingApk) { installPermissionLauncher.launch(it) }
+                            try {
+                                requestInstall(context, existingApk) { installPermissionLauncher.launch(it) }
+                            } catch (_: ActivityNotFoundException) {
+                                downloadError = "找不到系统安装程序"
+                            } catch (_: SecurityException) {
+                                downloadError = "系统未允许安装，请检查安装权限"
+                            }
                         } else {
                             downloadError = ""
+                            downloadedApk = null
                             isDownloading = true
-                            scope.launch {
+                            progress = ApkDownloadProgress(
+                                0, info.sizeBytes, info.downloadSourceName, ApkDownloadPhase.CONNECTING
+                            )
+                            downloadJob = scope.launch {
                                 try {
-                                    val apk = downloadApk(context, info)
-                                    downloadedApk = apk
-                                    requestInstall(context, apk) { installPermissionLauncher.launch(it) }
-                                } catch (exception: Exception) {
+                                    downloader.download(info, context.cacheDir).collect { event ->
+                                        when (event) {
+                                            is ApkDownloadEvent.Progress -> progress = event.value
+                                            is ApkDownloadEvent.Complete -> {
+                                                progress = event.progress
+                                                downloadedApk = event.file
+                                                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                                                    requestInstall(context, event.file) { installPermissionLauncher.launch(it) }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    downloadError = "下载已取消，可重新下载"
+                                    progress = null
+                                    throw cancelled
+                                } catch (exception: IOException) {
                                     downloadError = exception.message ?: "更新包下载失败，请稍后重试"
+                                    progress = null
+                                } catch (_: ActivityNotFoundException) {
+                                    downloadError = "找不到系统安装程序"
+                                } catch (_: SecurityException) {
+                                    downloadError = "无法访问更新包或安装程序，请检查权限"
                                 } finally {
                                     isDownloading = false
+                                    downloadJob = null
                                 }
                             }
                         }
@@ -148,45 +207,20 @@ fun UpdateCheckEffect() {
             dismissButton = {
                 TextButton(
                     onClick = {
-                        configStore.setIgnoredUpdateVersion(info.version)
-                        showDialog = false
+                        if (isDownloading) {
+                            downloadJob?.cancel()
+                        } else {
+                            configStore.setIgnoredUpdateVersion(info.version)
+                            showDialog = false
+                        }
                     }
                 ) {
-                    Text("忽略此版本")
+                    Text(if (isDownloading) "取消下载" else "忽略此版本")
                 }
             }
         )
     }
 }
-
-private suspend fun downloadApk(context: Context, info: ReleaseInfo): File =
-    withContext(Dispatchers.IO) {
-        val target = File(context.cacheDir, "ai-bookkeeper-${info.version}.apk")
-        val temporary = File(context.cacheDir, "${target.name}.download")
-        val connection = (URL(info.downloadUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            instanceFollowRedirects = true
-            connectTimeout = 15_000
-            readTimeout = 30_000
-        }
-        try {
-            if (connection.responseCode !in 200..299) {
-                throw IllegalStateException("更新包下载失败（HTTP ${connection.responseCode}）")
-            }
-            connection.inputStream.use { input ->
-                temporary.outputStream().use { output -> input.copyTo(output) }
-            }
-            check(temporary.length() > 0) { "下载的更新包为空" }
-            if (target.exists() && !target.delete()) {
-                throw IllegalStateException("无法替换旧的更新包")
-            }
-            check(temporary.renameTo(target)) { "无法保存更新包" }
-            target
-        } finally {
-            connection.disconnect()
-            if (temporary.exists()) temporary.delete()
-        }
-    }
 
 private fun canInstallPackages(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||

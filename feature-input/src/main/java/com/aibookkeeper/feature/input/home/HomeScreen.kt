@@ -553,7 +553,7 @@ fun HomeScreen(
                     is AiStatus.Success -> {
                         Text(
                             text = "✅ 记账成功：${status.message}",
-                            color = Color(0xFF4CAF50),
+                            color = MaterialTheme.colorScheme.secondary,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(top = 8.dp)
                         )
@@ -718,7 +718,7 @@ private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit 
             text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}${"%.2f".format(transaction.amount)}元",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Medium,
-            color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50)
+            color = if (transaction.type == TransactionType.INCOME) MaterialTheme.colorScheme.secondary
             else MaterialTheme.colorScheme.onSurface
         )
     }

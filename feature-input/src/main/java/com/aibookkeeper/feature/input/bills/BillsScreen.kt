@@ -132,7 +132,7 @@ fun BillsScreen(
                         text = "¥${"%.2f".format(uiState.monthIncome)}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4CAF50)
+                        color = MaterialTheme.colorScheme.secondary
                     )
                 }
             }
@@ -326,7 +326,7 @@ private fun DayHeader(dayGroup: DayGroup) {
                 Text(
                     text = "收入 ¥${"%.2f".format(dayGroup.dayIncome)}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF4CAF50)
+                    color = MaterialTheme.colorScheme.secondary
                 )
             }
         }
@@ -436,7 +436,7 @@ private fun TransactionItem(
             text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}¥${"%.2f".format(transaction.amount)}",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Medium,
-            color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
+            color = if (transaction.type == TransactionType.INCOME) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
         )
     }
     HorizontalDivider(modifier = Modifier.padding(start = 68.dp))

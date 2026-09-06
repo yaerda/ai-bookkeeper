@@ -52,6 +52,7 @@ class SharedLedgerSessionTest {
     private val api = mockk<SyncApi>()
     private val categorySync = mockk<LedgerCategorySync>()
     private val preferences = mockk<SyncPreferences>()
+    private val savedSelections = mutableMapOf<String, String>()
     private val authState = MutableStateFlow<AuthState>(AuthState.SignedOut)
     private val boundAccount = MutableStateFlow<String?>("account-a")
     private val categoryA = LedgerCategoryDto(601, "家庭菜园", "EXPENSE", "🪴", "#123ABC", 20, false)
@@ -70,6 +71,10 @@ class SharedLedgerSessionTest {
     fun setup() {
         every { auth.state } returns authState
         every { preferences.boundAccountId } returns boundAccount
+        every { preferences.selectedLedgerId(any()) } answers { savedSelections[firstArg<String>()] }
+        every { preferences.updateSelectedLedgerId(any(), any()) } answers {
+            savedSelections[firstArg<String>()] = secondArg<String>()
+        }
         coEvery { auth.acquireToken() } answers {
             (authState.value as? AuthState.SignedIn)?.let {
                 AccessToken("token-${it.accountId}", it.accountId)
@@ -92,6 +97,107 @@ class SharedLedgerSessionTest {
         authState.value = AuthState.SignedIn("account-a", "owner@example.com")
         runCurrent()
         return session
+    }
+
+    @Test
+    fun `selected shared ledger survives a new session without importing into Room`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+
+        val restored = SharedLedgerSession(auth, api, categorySync, preferences, backgroundScope)
+        runCurrent()
+
+        assertEquals("shared-a", restored.state.value.selectedLedgerId)
+        assertFalse(restored.state.value.selectedLedger.isLocal)
+        assertEquals(listOf(categoryA.toCategory()), restored.remoteCategories.value)
+        coVerify(exactly = 1) { categorySync.syncDefault(any()) }
+    }
+
+    @Test
+    fun `returning to default replaces the remembered remote ledger`() = runTest {
+        val session = start()
+        session.selectLedger("new-owned")
+        runCurrent()
+        session.selectLedger("default")
+        runCurrent()
+
+        val restored = SharedLedgerSession(auth, api, categorySync, preferences, backgroundScope)
+        runCurrent()
+
+        assertEquals("default", restored.state.value.selectedLedgerId)
+        assertTrue(restored.state.value.selectedLedger.isLocal)
+        assertTrue(restored.remoteCategories.value.isEmpty())
+    }
+
+    @Test
+    fun `remembered selection survives logout and stays isolated between accounts`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+        authState.value = AuthState.SignedOut
+        runCurrent()
+        assertTrue(session.state.value.selectedLedger.isLocal)
+        assertEquals("shared-a", savedSelections["account-a"])
+
+        authState.value = AuthState.SignedIn("account-b", "b@example.com")
+        runCurrent()
+        assertEquals("default", session.state.value.selectedLedgerId)
+        assertFalse(session.state.value.selectedLedger.isLocal)
+        session.selectLedger("shared-b")
+        runCurrent()
+
+        authState.value = AuthState.SignedIn("account-a", "owner@example.com")
+        runCurrent()
+        assertEquals("shared-a", session.state.value.selectedLedgerId)
+        authState.value = AuthState.SignedIn("account-b", "b@example.com")
+        runCurrent()
+        assertEquals("shared-b", session.state.value.selectedLedgerId)
+        assertFalse(session.state.value.canEdit)
+        assertEquals("shared-a", savedSelections["account-a"])
+        coVerify(exactly = 0) { categorySync.syncDefault(match { it.accountId == "account-b" }) }
+    }
+
+    @Test
+    fun `unavailable remembered ledger falls back to local default`() = runTest {
+        savedSelections["account-a"] = "removed-ledger"
+
+        val session = start()
+
+        assertEquals("default", session.state.value.selectedLedgerId)
+        assertEquals("default", savedSelections["account-a"])
+        assertTrue(session.state.value.selectedLedger.isLocal)
+        coVerify(exactly = 0) { api.categories(any(), "removed-ledger") }
+    }
+
+    @Test
+    fun `ledger list failure preserves remembered selection for retry`() = runTest {
+        savedSelections["account-a"] = "shared-a"
+        coEvery { api.familyLedgers(any()) } returns Response.error(503, "{}".toResponseBody())
+        val session = start()
+        assertFalse(session.state.value.errorMessage.isNullOrBlank())
+        assertEquals("shared-a", savedSelections["account-a"])
+
+        coEvery { api.familyLedgers(any()) } returns Response.success(ledgers)
+        session.refresh()
+
+        assertEquals("shared-a", session.state.value.selectedLedgerId)
+        assertEquals(listOf(categoryA.toCategory()), session.remoteCategories.value)
+    }
+
+    @Test
+    fun `removing the current ledger remembers the accessible fallback`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+        coEvery { api.familyLedgers(any()) } returns Response.success(
+            ledgers.copy(ledgers = ledgers.ledgers.filterNot { it.id == "shared-a" })
+        )
+
+        session.refresh()
+
+        assertEquals("default", session.state.value.selectedLedgerId)
+        assertEquals("default", savedSelections["account-a"])
     }
 
     @Test
@@ -248,6 +354,7 @@ class SharedLedgerSessionTest {
 
         assertEquals("shared-b", session.state.value.selectedLedgerId)
         assertEquals(listOf(categoryB.toCategory()), session.remoteCategories.value)
+        assertEquals("shared-b", savedSelections["account-a"])
     }
 
     @Test

@@ -49,8 +49,9 @@ internal fun holdToTalkRecognitionIntent(packageName: String): Intent =
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         // The user's release ends a hold-to-talk session, not a 1.2-second pause.
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SpeechInputSession.MAX_RECORDING_MILLIS)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, SpeechInputSession.MAX_RECORDING_MILLIS)
+        val silenceLengthMillis = SpeechInputSession.MAX_RECORDING_MILLIS.toInt()
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceLengthMillis)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceLengthMillis)
     }
 
 internal class AndroidSpeechInputEngine(

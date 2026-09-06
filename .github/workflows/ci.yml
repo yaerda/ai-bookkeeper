@@ -149,10 +149,16 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run voice and Room regression tests
+      - name: Decode keystore for app UI tests
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+      - name: Run voice, Room and update UI regression tests
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_6
-          script: ./gradlew :feature-input:connectedDebugAndroidTest :core-data:connectedDebugAndroidTest --no-daemon --stacktrace
+          script: ./gradlew :feature-input:connectedDebugAndroidTest :core-data:connectedDebugAndroidTest :app:connectedDebugAndroidTest --no-daemon --stacktrace

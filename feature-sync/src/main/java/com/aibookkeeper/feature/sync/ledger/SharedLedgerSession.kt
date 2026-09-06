@@ -134,6 +134,8 @@ class SharedLedgerSession internal constructor(
             synchronized(lock) {
                 if (!isCurrent(request)) return
                 val previousId = _state.value.selectedLedgerId
+                    .takeUnless { it == LOCAL_LEDGER_ID }
+                    ?: preferences.selectedLedgerId(request.accountId)
                 val selectedId = options.firstOrNull { it.id == previousId }?.id
                     ?: options.firstOrNull { it.isLocal }?.id
                     ?: options.first().id
@@ -142,6 +144,7 @@ class SharedLedgerSession internal constructor(
                     selectedLedgerId = selectedId,
                     isLoading = !options.first { it.id == selectedId }.isLocal
                 )
+                preferences.updateSelectedLedgerId(request.accountId, selectedId)
             }
             loadSelectedLedger(request, token)
         } catch (error: Exception) {
@@ -162,7 +165,10 @@ class SharedLedgerSession internal constructor(
                 selectionVersion = generation
             )
             val account = accountId ?: return
-            Request(account, generation, ledger.id)
+            val selectedRequest = Request(account, generation, ledger.id)
+            if (!isCurrent(selectedRequest)) return
+            preferences.updateSelectedLedgerId(account, ledger.id)
+            selectedRequest
         }
         scope.launch {
             try {

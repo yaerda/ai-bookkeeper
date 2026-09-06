@@ -35,8 +35,16 @@ class SyncPreferences @Inject constructor(
         preferences.edit().putLong(KEY_CURSOR, cursor).apply()
     }
 
+    fun selectedLedgerId(accountId: String): String? =
+        preferences.getString("$KEY_SELECTED_LEDGER_PREFIX$accountId", null)
+
+    fun updateSelectedLedgerId(accountId: String, ledgerId: String) {
+        preferences.edit().putString("$KEY_SELECTED_LEDGER_PREFIX$accountId", ledgerId).apply()
+    }
+
     private companion object {
         const val KEY_ACCOUNT_ID = "bound_account_id"
         const val KEY_CURSOR = "pull_cursor"
+        const val KEY_SELECTED_LEDGER_PREFIX = "selected_ledger_id:"
     }
 }

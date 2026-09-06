@@ -202,7 +202,7 @@ private fun SummaryCards(
         Card(
             modifier = Modifier.weight(1f),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
             ),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -210,13 +210,13 @@ private fun SummaryCards(
                 Text(
                     text = "支出",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                 )
                 Text(
                     text = formatCompactAmount(expense),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     maxLines = 1
                 )
             }
@@ -226,7 +226,7 @@ private fun SummaryCards(
         Card(
             modifier = Modifier.weight(1f),
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF4CAF50).copy(alpha = 0.12f)
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
             ),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -234,13 +234,13 @@ private fun SummaryCards(
                 Text(
                     text = "收入",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF2E7D32).copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
                 )
                 Text(
                     text = formatCompactAmount(income),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2E7D32),
+                    color = MaterialTheme.colorScheme.secondary,
                     maxLines = 1
                 )
             }
@@ -264,7 +264,7 @@ private fun SummaryCards(
                     text = "${if (balance < 0) "-" else ""}${formatCompactAmount(kotlin.math.abs(balance))}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (balance >= 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                    color = if (balance >= 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                     maxLines = 1
                 )
             }

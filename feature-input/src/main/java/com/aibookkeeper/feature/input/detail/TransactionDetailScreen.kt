@@ -240,7 +240,7 @@ private fun TransactionDetailContent(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (transaction.type == TransactionType.INCOME)
-                    Color(0xFF4CAF50).copy(alpha = 0.1f)
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
                 else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
             )
         ) {
@@ -278,7 +278,7 @@ private fun TransactionDetailContent(
                     text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}¥${"%.2f".format(transaction.amount)}",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Bold,
-                    color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50)
+                    color = if (transaction.type == TransactionType.INCOME) MaterialTheme.colorScheme.secondary
                     else MaterialTheme.colorScheme.onSurface
                 )
 

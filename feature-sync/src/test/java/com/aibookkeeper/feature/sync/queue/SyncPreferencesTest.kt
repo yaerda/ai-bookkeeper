@@ -5,7 +5,9 @@ import android.content.SharedPreferences
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -14,6 +16,44 @@ class SyncPreferencesTest {
     private val context = mockk<Context>()
     private val preferences = mockk<SharedPreferences>()
     private val editor = mockk<SharedPreferences.Editor>()
+
+    @Test
+    fun `new accounts have no remembered ledger`() {
+        every { context.getSharedPreferences("cloud_sync", Context.MODE_PRIVATE) } returns preferences
+        every { preferences.getString(any(), null) } returns null
+
+        assertNull(SyncPreferences(context).selectedLedgerId("account-a"))
+        verify(exactly = 0) { preferences.edit() }
+    }
+
+    @Test
+    fun `last ledger persists per account without changing the local ledger binding`() {
+        val values = mutableMapOf<String, String?>("bound_account_id" to "account-a")
+        every { context.getSharedPreferences("cloud_sync", Context.MODE_PRIVATE) } returns preferences
+        every { preferences.getString(any(), any()) } answers {
+            values[firstArg<String>()] ?: secondArg<String?>()
+        }
+        every { preferences.edit() } returns editor
+        every { editor.putString(any(), any()) } answers {
+            values[firstArg<String>()] = secondArg<String?>()
+            editor
+        }
+        every { editor.apply() } returns Unit
+
+        val initial = SyncPreferences(context)
+        initial.updateSelectedLedgerId("account-a", "shared-a")
+        initial.updateSelectedLedgerId("account-b", "shared-b")
+        val restored = SyncPreferences(context)
+
+        assertEquals("shared-a", restored.selectedLedgerId("account-a"))
+        assertEquals("shared-b", restored.selectedLedgerId("account-b"))
+        restored.updateSelectedLedgerId("account-a", "default")
+        assertEquals("default", SyncPreferences(context).selectedLedgerId("account-a"))
+        assertEquals("shared-b", restored.selectedLedgerId("account-b"))
+        assertEquals("account-a", restored.boundAccountId.value)
+        verify(exactly = 3) { editor.apply() }
+        verify(exactly = 0) { editor.putString("bound_account_id", any()) }
+    }
 
     @Test
     fun `first account permanently binds the local ledger`() {

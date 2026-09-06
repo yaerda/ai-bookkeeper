@@ -8,6 +8,18 @@ data class ChangelogEntry(
 
 val CHANGELOG = listOf(
     ChangelogEntry(
+        version = "1.0.8",
+        date = "2026-09-06",
+        highlights = listOf(
+            "🎨 统一为柿橙、叶绿和米白主题，保留现有布局、字号、导航与手势",
+            "📚 在本机按账号记住上次选择的账本，重新打开后恢复可访问的账本",
+            "⬇️ 更新优先使用官方东亚下载通道，失败时回退 GitHub",
+            "📊 更新下载展示百分比、已下载/总大小和来源，支持取消与重试",
+            "🛡️ 更新包安装前检查发布大小、SHA-256 和 APK 压缩结构",
+            "🎙️ 修正系统语音识别静音时长参数的类型兼容问题"
+        )
+    ),
+    ChangelogEntry(
         version = "1.0.4",
         date = "2026-09-04",
         highlights = listOf(
