@@ -8,6 +8,15 @@ data class ChangelogEntry(
 
 val CHANGELOG = listOf(
     ChangelogEntry(
+        version = "1.0.9",
+        date = "2026-09-06",
+        highlights = listOf(
+            "🧾 修复照片识别后批量编辑删除项目未同步、最终保存仍包含已删除项目的问题",
+            "✏️ 关闭、完成或返回时同步编辑后的列表，保留剩余项目的分类、日期和修改内容",
+            "↩️ 支持编辑撤销；删除全部项目后不会恢复旧项目，延迟更新也不会覆盖新结果"
+        )
+    ),
+    ChangelogEntry(
         version = "1.0.8",
         date = "2026-09-06",
         highlights = listOf(

@@ -187,6 +187,49 @@ class TransactionSaverTest {
     }
 
     @Nested
+    inner class EditedBatch {
+
+        @Test
+        fun `repository receives only retained edited rows with categories and shared date`() = runTest {
+            val saved = mutableListOf<Transaction>()
+            coEvery { transactionRepository.create(capture(saved)) } answers {
+                Result.success(saved.size.toLong())
+            }
+            val originalLines = listOf("删除项 -¥100.00", "午餐 -¥26.00", "工资 +¥50.00")
+            val originalItems = listOf(
+                makeItem(amount = 100.0, note = "删除项"),
+                makeItem(amount = 26.0, note = "午餐"),
+                makeItem(amount = 50.0, type = "INCOME", category = "工资", note = "工资")
+            )
+            val text = "午餐 -¥28.50\n工资 +¥55.00"
+            val edited = applyCaptureTextEdits(
+                text, originalLines, originalItems, makeItem(amount = 176.0, date = "2026-09-06")
+            )
+
+            val result = saver.saveAll(edited.items, text, edited.summary?.date)
+
+            assertEquals(2 to 83.5, result)
+            assertEquals(listOf("午餐", "工资"), saved.map { it.note })
+            assertEquals(listOf(28.5, 55.0), saved.map { it.amount })
+            assertEquals(listOf(foodCategory.id, salaryCategory.id), saved.map { it.categoryId })
+            assertEquals(listOf("EXPENSE", "INCOME"), saved.map { it.type.name })
+            assertTrue(saved.all { it.date.toLocalDate().toString() == "2026-09-06" })
+            assertTrue(saved.all { it.originalInput == text })
+            coVerify(exactly = 2) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `deleting every recognized row causes no repository writes`() = runTest {
+            val edited = applyCaptureTextEdits(
+                "", listOf("午餐 ¥26.00"), listOf(makeItem()), makeItem()
+            )
+
+            assertEquals(0 to 0.0, saver.saveAll(edited.items))
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+    }
+
+    @Nested
     inner class SaveAll {
 
         @Test

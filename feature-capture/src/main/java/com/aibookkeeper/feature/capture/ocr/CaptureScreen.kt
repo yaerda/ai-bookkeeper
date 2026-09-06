@@ -67,6 +67,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -98,7 +99,6 @@ internal fun shouldDefaultToSplit(items: List<ExtractionResult>): Boolean {
     return "EXPENSE" in types && "INCOME" in types
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CaptureScreen(
     navController: NavController,
@@ -106,12 +106,24 @@ fun CaptureScreen(
     autoAction: String? = null,
     initialImageUri: String? = null
 ) {
-    val context = LocalContext.current
-    val appContext = context.applicationContext
-    val coroutineScope = rememberCoroutineScope()
+    val appContext = LocalContext.current.applicationContext
     val entryPoint = remember(appContext) {
         EntryPointAccessors.fromApplication(appContext, CaptureScreenEntryPoint::class.java)
     }
+    CaptureScreen(navController, entryPoint, modifier, autoAction, initialImageUri)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CaptureScreen(
+    navController: NavController,
+    entryPoint: CaptureScreenEntryPoint,
+    modifier: Modifier = Modifier,
+    autoAction: String? = null,
+    initialImageUri: String? = null
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val pipeline = remember(entryPoint) { entryPoint.notificationExtractionPipeline() }
     val transactionRepository = remember(entryPoint) { entryPoint.transactionRepository() }
     val strategyManager = remember(entryPoint) { entryPoint.extractionStrategyManager() }
@@ -142,49 +154,23 @@ fun CaptureScreen(
 
     val hasContent = ocrText.isNotBlank() || extractionResult != null || savedMessage.isNotBlank()
 
-    // Regex to extract amount and sign from structured text like "商品名 ¥26.00" or "+¥26.00" or "-¥26.00"
-    val amountRegex = remember { Regex("([+-])?\\s*[¥￥]\\s*(\\d+\\.?\\d*)") }
-
-    // Parse amounts from text using regex, update right side results
-    fun updateResultsFromText(text: String) {
-        val lines = text.lines().filter { it.isNotBlank() }
-
-        data class ParsedItem(val amount: Double, val type: String)
-
-        val parsed = lines.map { line ->
-            val match = amountRegex.find(line)
-            val rawAmount = match?.groupValues?.get(2)?.toDoubleOrNull() ?: 0.0
-            val sign = match?.groupValues?.get(1) ?: ""
-            val type = if (sign == "+") "INCOME" else "EXPENSE"
-            ParsedItem(rawAmount, type)
-        }
-
-        val totalExpense = parsed.filter { it.type == "EXPENSE" }.sumOf { it.amount }
-        val totalIncome = parsed.filter { it.type == "INCOME" }.sumOf { it.amount }
-        val totalAmount = totalExpense + totalIncome
-
-        // Update summary result
-        extractionResult = extractionResult?.copy(amount = totalAmount)
-            ?: if (totalAmount > 0) ExtractionResult(
-                amount = totalAmount, type = "EXPENSE", category = "其他",
-                date = java.time.LocalDate.now().toString(), confidence = 0.5f
-            ) else null
-
-        // Update split items
-        if (visionItems.isNotEmpty()) {
-            visionItems = visionItems.mapIndexed { index, item ->
-                val p = parsed.getOrNull(index)
-                item.copy(
-                    amount = p?.amount ?: item.amount ?: 0.0,
-                    type = p?.type ?: item.type,
-                    note = lines.getOrNull(index)?.replace(amountRegex, "")?.trim() ?: item.note
-                )
-            }
-        }
-        splitTexts = lines
+    fun applyEditedResults(edited: CaptureTextEditResult) {
+        extractionResult = edited.summary
+        visionItems = edited.items
+        splitTexts = edited.lines
     }
 
-    // Debounced update for inline editing (2s delay)
+    fun updateResultsFromText(text: String) {
+        applyEditedResults(applyCaptureTextEdits(text, splitTexts, visionItems, extractionResult))
+    }
+
+    fun commitTextEdits(edited: CaptureTextEditResult? = null) {
+        debounceJob?.cancel()
+        debounceJob = null
+        applyEditedResults(edited ?: applyCaptureTextEdits(ocrText, splitTexts, visionItems, extractionResult))
+    }
+
+    // Debounced update for inline editing (1s delay)
     fun scheduleUpdateFromText(text: String) {
         debounceJob?.cancel()
         debounceJob = coroutineScope.launch {
@@ -392,6 +378,7 @@ fun CaptureScreen(
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
                 ocrText = visionText.text.trim()
+                splitTexts = ocrText.lines().filter { it.isNotBlank() }
                 if (ocrText.isBlank()) {
                     isProcessing = false
                     errorMessage = "未识别到文字内容"
@@ -661,13 +648,12 @@ fun CaptureScreen(
 
     // ── Fullscreen text editor ──
     if (showFullscreenEditor) {
-        val originalText = remember { ocrText }
+        val editor = remember {
+            CaptureTextEditSession(ocrText, CaptureTextEditResult(splitTexts, visionItems, extractionResult))
+        }
         fun dismissEditor() {
+            commitTextEdits(editor.result)
             showFullscreenEditor = false
-            splitTexts = ocrText.lines().filter { it.isNotBlank() }
-            if (ocrText != originalText) {
-                updateResultsFromText(ocrText)
-            }
         }
         Dialog(
             onDismissRequest = { dismissEditor() },
@@ -692,11 +678,15 @@ fun CaptureScreen(
             ) { padding ->
                 OutlinedTextField(
                     value = ocrText,
-                    onValueChange = { ocrText = it },
+                    onValueChange = {
+                        ocrText = it
+                        editor.edit(it)
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        .testTag("capture-text-editor"),
                     placeholder = { Text("OCR 识别结果") }
                 )
             }
@@ -962,7 +952,10 @@ fun CaptureScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             OutlinedButton(
-                                onClick = { showFullscreenEditor = true },
+                                onClick = {
+                                    commitTextEdits()
+                                    showFullscreenEditor = true
+                                },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
@@ -970,7 +963,8 @@ fun CaptureScreen(
                             }
                             Button(
                                 onClick = {
-                                    if (isSplitMode && visionItems.isNotEmpty()) {
+                                    commitTextEdits()
+                                    if (isSplitMode) {
                                         confirmAndSaveAll(visionItems)
                                     } else {
                                         extractionResult?.let { confirmAndSave(it) }
