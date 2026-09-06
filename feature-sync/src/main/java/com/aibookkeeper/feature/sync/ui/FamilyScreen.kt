@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,6 +74,9 @@ fun FamilyScreen(
                 },
                 actions = {
                     if (uiState.authState is AuthState.SignedIn) {
+                        IconButton(onClick = viewModel::refresh, enabled = !uiState.isLoading) {
+                            Icon(Icons.Default.Refresh, "刷新账本和成员名称")
+                        }
                         IconButton(onClick = { showCreateLedger = true }) {
                             Icon(Icons.Default.Add, "新建账本")
                         }
@@ -127,7 +131,7 @@ fun FamilyScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(invitation.ledgerName, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "${invitation.inviterEmail} · " +
+                                    "${invitation.inviterLabel} · " +
                                         roleLabel(invitation.role),
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -158,12 +162,28 @@ fun FamilyScreen(
                                 selected = ledger.id == uiState.selectedLedgerId,
                                 onClick = { viewModel.selectLedger(ledger.id) },
                                 label = {
-                                    Text(
-                                        "${ledger.name} · ${roleLabel(ledger.role)}"
-                                    )
+                                    Column {
+                                        Text("${ledger.name} · ${roleLabel(ledger.role)}")
+                                        if (ledger.mode == "FAMILY") {
+                                            Text(
+                                                "所有者：${ledger.ownerLabel}",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
                                 }
                             )
                         }
+                    }
+                }
+
+                uiState.selectedLedger?.takeIf { it.mode == "FAMILY" }?.let { ledger ->
+                    item {
+                        Text(
+                            text = "账本所有者：${ledger.ownerLabel}",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
 
@@ -239,7 +259,10 @@ fun FamilyScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(member.email)
+                                    Text(member.displayLabel)
+                                    if (member.displayLabel != member.email) {
+                                        Text(member.email, style = MaterialTheme.typography.bodySmall)
+                                    }
                                     Text(
                                         roleLabel(member.role),
                                         style = MaterialTheme.typography.bodySmall

@@ -8,6 +8,14 @@ data class ChangelogEntry(
 
 val CHANGELOG = listOf(
     ChangelogEntry(
+        version = "1.0.10",
+        date = "2026-09-07",
+        highlights = listOf(
+            "👥 家庭账本和邀请优先显示所有者的云端昵称，未设置时保留邮箱回退",
+            "🔄 家庭管理支持刷新账本与成员名称，不修改邮箱身份、权限或账本名称"
+        )
+    ),
+    ChangelogEntry(
         version = "1.0.9",
         date = "2026-09-06",
         highlights = listOf(

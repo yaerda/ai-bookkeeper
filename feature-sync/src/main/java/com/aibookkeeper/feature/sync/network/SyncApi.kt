@@ -1,5 +1,6 @@
 package com.aibookkeeper.feature.sync.network
 
+import com.aibookkeeper.core.data.repository.familyIdentityLabel
 import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.Body
@@ -56,8 +57,12 @@ data class FamilyLedgerDto(
     val ownerEmail: String,
     val role: String,
     val mode: String,
-    val isDefault: Boolean = false
-)
+    val isDefault: Boolean = false,
+    val ownerDisplayName: String? = null
+) {
+    val ownerLabel: String
+        get() = familyIdentityLabel(ownerDisplayName, ownerEmail)
+}
 
 @Serializable
 data class FamilyInvitationDto(
@@ -65,8 +70,12 @@ data class FamilyInvitationDto(
     val ledgerId: String,
     val ledgerName: String,
     val inviterEmail: String,
-    val role: String
-)
+    val role: String,
+    val inviterDisplayName: String? = null
+) {
+    val inviterLabel: String
+        get() = familyIdentityLabel(inviterDisplayName, inviterEmail)
+}
 
 @Serializable
 data class FamilyLedgersResponse(
@@ -79,8 +88,12 @@ data class FamilyMemberDto(
     val id: String,
     val userId: String,
     val email: String,
-    val role: String
-)
+    val role: String,
+    val displayName: String? = null
+) {
+    val displayLabel: String
+        get() = familyIdentityLabel(displayName, email)
+}
 
 @Serializable
 data class PendingFamilyInvitationDto(

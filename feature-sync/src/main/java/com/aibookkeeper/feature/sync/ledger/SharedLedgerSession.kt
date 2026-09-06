@@ -126,6 +126,7 @@ class SharedLedgerSession internal constructor(
                     id = ledger.id,
                     name = if (isLocal && ledger.mode == "PERSONAL") "个人账本" else ledger.name,
                     ownerEmail = ledger.ownerEmail,
+                    ownerDisplayName = ledger.ownerDisplayName,
                     role = ledger.role,
                     mode = ledger.mode,
                     isLocal = isLocal

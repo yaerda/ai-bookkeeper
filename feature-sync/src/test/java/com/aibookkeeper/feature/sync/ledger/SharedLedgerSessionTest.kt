@@ -100,6 +100,30 @@ class SharedLedgerSessionTest {
     }
 
     @Test
+    fun `owner profile changes refresh in the selected shared ledger without replacing email or selection`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+        val named = ledgers.copy(ledgers = ledgers.ledgers.map {
+            if (it.id == "shared-a") it.copy(ownerDisplayName = "Cloud Owner") else it
+        })
+        coEvery { api.familyLedgers(any()) } returns Response.success(named)
+
+        session.refresh()
+
+        assertEquals("shared-a", session.state.value.selectedLedgerId)
+        assertEquals("Cloud Owner", session.state.value.selectedLedger.ownerLabel)
+        assertEquals("a@example.com", session.state.value.selectedLedger.ownerEmail)
+        assertFalse(session.state.value.selectedLedger.isLocal)
+        coEvery { api.familyLedgers(any()) } returns Response.success(ledgers)
+
+        session.refresh()
+
+        assertEquals("a@example.com", session.state.value.selectedLedger.ownerLabel)
+        assertEquals("shared-a", session.state.value.selectedLedgerId)
+    }
+
+    @Test
     fun `selected shared ledger survives a new session without importing into Room`() = runTest {
         val session = start()
         session.selectLedger("shared-a")

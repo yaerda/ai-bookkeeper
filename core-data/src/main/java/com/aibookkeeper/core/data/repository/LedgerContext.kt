@@ -2,14 +2,21 @@ package com.aibookkeeper.core.data.repository
 
 import kotlinx.coroutines.flow.StateFlow
 
+fun familyIdentityLabel(displayName: String?, email: String): String =
+    displayName?.trim()?.takeIf { it.isNotEmpty() } ?: email
+
 data class LedgerOption(
     val id: String,
     val name: String,
     val ownerEmail: String,
     val role: String,
     val mode: String,
-    val isLocal: Boolean
+    val isLocal: Boolean,
+    val ownerDisplayName: String? = null
 ) {
+    val ownerLabel: String
+        get() = familyIdentityLabel(ownerDisplayName, ownerEmail)
+
     val canEdit: Boolean
         get() = role == "OWNER" || role == "EDITOR"
 }

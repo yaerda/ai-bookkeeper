@@ -208,6 +208,13 @@ fun HomeScreen(
                                         text = {
                                             Column {
                                                 Text(ledger.name)
+                                                if (ledger.mode == "FAMILY") {
+                                                    Text(
+                                                        text = "所有者：${ledger.ownerLabel}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                                 if (!ledger.isLocal) {
                                                     Text(
                                                         text = when (ledger.role) {
