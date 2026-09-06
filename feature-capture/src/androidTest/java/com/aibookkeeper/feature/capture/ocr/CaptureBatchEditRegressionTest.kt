@@ -2,6 +2,7 @@ package com.aibookkeeper.feature.capture.ocr
 
 import android.content.Context
 import android.os.SystemClock
+import android.view.KeyEvent
 import android.widget.Toast
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -20,7 +21,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.navigation.compose.rememberNavController
-import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
@@ -180,8 +180,14 @@ class CaptureBatchEditRegressionTest {
     fun systemBackCommitsDeletingAllAndNeitherSaveModeCanRestoreItems() {
         launchRecognition()
         editText("")
-        Espresso.closeSoftKeyboard()
-        Espresso.pressBack()
+        repeat(2) {
+            if (compose.onAllNodes(hasText("编辑识别文本"))
+                    .fetchSemanticsNodes().isNotEmpty()) {
+                // Back may first dismiss the IME; send it to the focused window, not Espresso's activity root.
+                InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                compose.waitForIdle()
+            }
+        }
 
         compose.onNodeWithText("编辑识别文本").assertDoesNotExist()
         compose.onNodeWithText("✨ AI记账").assertIsNotEnabled()

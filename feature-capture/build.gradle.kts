@@ -90,7 +90,6 @@ dependencies {
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation("androidx.test.espresso:espresso-core:${libs.versions.espresso.get()}")
     androidTestImplementation(libs.mockk.android)
 }
 
