@@ -45,6 +45,7 @@ import com.aibookkeeper.feature.capture.notification.PaymentNotificationService
 import com.aibookkeeper.feature.stats.navigation.statsNavGraph
 import com.aibookkeeper.feature.sync.ui.SyncScreen
 import com.aibookkeeper.feature.sync.ui.FamilyScreen
+import com.aibookkeeper.feature.sync.ui.ProjectScreen
 import com.aibookkeeper.onboarding.OnboardingScreen
 import com.aibookkeeper.splash.SplashScreen
 import com.aibookkeeper.update.UpdateCheckEffect
@@ -53,6 +54,7 @@ private const val ROUTE_ONBOARDING = "onboarding"
 private const val ROUTE_SPLASH = "splash"
 private const val ROUTE_SYNC = "cloud-sync"
 private const val ROUTE_FAMILY = "family-ledger"
+private const val ROUTE_PROJECTS = "project-settings"
 
 sealed class BottomNavItem(
     val route: String,
@@ -214,7 +216,8 @@ fun AppNavHost(
                     }
                 },
                 onCloudSyncClick = { navController.navigate(ROUTE_SYNC) },
-                onFamilyLedgerClick = { navController.navigate(ROUTE_FAMILY) }
+                onFamilyLedgerClick = { navController.navigate(ROUTE_FAMILY) },
+                onProjectsClick = { navController.navigate(ROUTE_PROJECTS) }
             )
             composable(ROUTE_SYNC) {
                 SyncScreen(onBack = { navController.popBackStack() })
@@ -223,6 +226,9 @@ fun AppNavHost(
                 FamilyScreen(
                     onBack = { navController.popBackStack() }
                 )
+            }
+            composable(ROUTE_PROJECTS) {
+                ProjectScreen(onBack = { navController.popBackStack() })
             }
         }
     }

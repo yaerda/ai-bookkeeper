@@ -11,6 +11,7 @@ import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.Path
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Query
 
 @Serializable
@@ -33,6 +34,7 @@ data class SyncTransactionDto(
     val status: String,
     val aiConfidence: Float?,
     val deletedAt: Long?,
+    val projectIds: List<String>? = null,
     val recordedByUserId: String? = null,
     val recordedByDisplayName: String? = null,
     val recordedByEmail: String? = null
@@ -168,6 +170,73 @@ data class CategoriesResponse(val categories: List<LedgerCategoryDto>)
 @Serializable
 data class CategoryResponse(val category: LedgerCategoryDto)
 
+@Serializable
+data class ProjectBindingDto(
+    val projectId: String,
+    val ledgerId: String,
+    val name: String,
+    val enabled: Boolean,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val timeZone: String = "Asia/Shanghai",
+    val version: Long,
+    val active: Boolean,
+    val canEdit: Boolean
+)
+
+@Serializable
+data class ProjectsResponse(
+    val ledgerId: String,
+    val role: String,
+    val projects: List<ProjectBindingDto>
+)
+
+@Serializable
+data class CreateProjectRequest(
+    val name: String,
+    val ledgerIds: List<String>? = null,
+    val enabled: Boolean = true,
+    val startDate: String? = null,
+    val endDate: String? = null
+)
+
+@Serializable
+data class ProjectScopeResponse(
+    val projectId: String,
+    val name: String,
+    val ledgers: List<ProjectBindingDto>
+)
+
+@Serializable
+data class ProjectLedgerUpdateRequest(
+    val version: Long,
+    val enabled: Boolean,
+    val startDate: String? = null,
+    val endDate: String? = null
+)
+
+@Serializable
+data class ProjectStatsLedgerDto(
+    val ledgerId: String,
+    val ledgerName: String,
+    val transactionCount: Int,
+    val income: String,
+    val expense: String,
+    val balance: String
+)
+
+@Serializable
+data class ProjectStatsResponse(
+    val projectId: String,
+    val name: String,
+    val currency: String,
+    val transactionCount: Int,
+    val income: String,
+    val expense: String,
+    val balance: String,
+    val ledgers: List<ProjectStatsLedgerDto>
+)
+
 interface SyncApi {
     @GET("categories")
     suspend fun categories(
@@ -255,4 +324,37 @@ interface SyncApi {
         @Body request: FamilySettingsRequest,
         @Query("ledgerId") ledgerId: String? = null
     ): Response<FamilyLedgerSettingsDto>
+
+    @GET("projects")
+    suspend fun projects(
+        @Header("Authorization") authorization: String,
+        @Query("ledgerId") ledgerId: String
+    ): Response<ProjectsResponse>
+
+    @POST("projects")
+    suspend fun createProject(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateProjectRequest
+    ): Response<ProjectScopeResponse>
+
+    @GET("projects/{projectId}/scope")
+    suspend fun projectScope(
+        @Header("Authorization") authorization: String,
+        @Path("projectId") projectId: String
+    ): Response<ProjectScopeResponse>
+
+    @PUT("projects/{projectId}/ledgers/{ledgerId}")
+    suspend fun updateProjectBinding(
+        @Header("Authorization") authorization: String,
+        @Path("projectId") projectId: String,
+        @Path("ledgerId") ledgerId: String,
+        @Body request: ProjectLedgerUpdateRequest
+    ): Response<ProjectBindingDto>
+
+    @GET("projects/{projectId}/stats")
+    suspend fun projectStats(
+        @Header("Authorization") authorization: String,
+        @Path("projectId") projectId: String,
+        @Query("ledgerId") ledgerId: String? = null
+    ): Response<ProjectStatsResponse>
 }

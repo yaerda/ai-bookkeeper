@@ -14,6 +14,7 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerSelection
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -68,9 +69,12 @@ class QuickInputViewModel @Inject constructor(
     private val aiExtractionRepository: AiExtractionRepository,
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
-    private val ledgerContext: LedgerContext
+    private val ledgerContext: LedgerContext,
+    projectRepository: ProjectRepository
 ) : ViewModel() {
 
+    val projectState = projectRepository.currentLedgerState
+    val ledgerState = ledgerContext.state
     private val _uiState = MutableStateFlow<QuickInputUiState>(QuickInputUiState.Idle())
     val uiState: StateFlow<QuickInputUiState> = _uiState.asStateFlow()
 
@@ -132,10 +136,11 @@ class QuickInputViewModel @Inject constructor(
     /**
      * Submit a quick-category entry: only amount is needed, category is preselected.
      */
-    fun submitCategoryAmount(amount: Double, categoryName: String) {
+    fun submitCategoryAmount(amount: Double, categoryName: String, projectIds: List<String>? = null) {
         if (_uiState.value !is QuickInputUiState.Idle) return
         _uiState.value = QuickInputUiState.Saving
         val selection = preselectedSelection ?: ledgerContext.state.value.selection
+        val selectedProjectIds = projectIds?.toList()
 
         viewModelScope.launch {
             runCatching {
@@ -155,7 +160,8 @@ class QuickInputViewModel @Inject constructor(
                     source = TransactionSource.NOTIFICATION_QUICK,
                     status = TransactionStatus.CONFIRMED,
                     syncStatus = SyncStatus.LOCAL,
-                    originalInput = "快捷分类: $categoryName ¥${"%.2f".format(amount)}"
+                    originalInput = "快捷分类: $categoryName ¥${"%.2f".format(amount)}",
+                    projectIds = selectedProjectIds
                 )
                 ledgerContext.requireEditable(selection)
                 transactionRepository.create(transaction).getOrThrow()
@@ -176,10 +182,11 @@ class QuickInputViewModel @Inject constructor(
     /**
      * Confirm the previewed extraction and save the transaction.
      */
-    fun confirmSave() {
+    fun confirmSave(projectIds: List<String>? = null) {
         val preview = _uiState.value as? QuickInputUiState.Preview ?: return
         val extraction = lastExtractionResult ?: return
         val selection = extractionSelection ?: return
+        val selectedProjectIds = projectIds?.toList()
         _uiState.value = QuickInputUiState.Saving
 
         viewModelScope.launch {
@@ -212,7 +219,8 @@ class QuickInputViewModel @Inject constructor(
                         TransactionStatus.PENDING
                     },
                     syncStatus = SyncStatus.LOCAL,
-                    aiConfidence = extraction.confidence
+                    aiConfidence = extraction.confidence,
+                    projectIds = selectedProjectIds
                 )
                 ledgerContext.requireEditable(selection)
                 transactionRepository.create(transaction).getOrThrow()

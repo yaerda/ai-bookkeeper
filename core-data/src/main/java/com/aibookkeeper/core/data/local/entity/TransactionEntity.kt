@@ -81,6 +81,21 @@ data class TransactionEntity(
     @ColumnInfo(name = "deletedAt")
     val deletedAt: Long? = null,
 
+    @ColumnInfo(name = "projectIdsState", defaultValue = "'UNSPECIFIED'")
+    val projectIdsState: String = "UNSPECIFIED",
+
+    @ColumnInfo(name = "projectIdsBlob")
+    val projectIdsBlob: String? = null,
+
+    @ColumnInfo(name = "projectIdsWriteState", defaultValue = "'UNSPECIFIED'")
+    val projectIdsWriteState: String = "UNSPECIFIED",
+
+    @ColumnInfo(name = "projectIdsWriteBlob")
+    val projectIdsWriteBlob: String? = null,
+
+    @ColumnInfo(name = "projectIdsWriteUpdatedAt", defaultValue = "0")
+    val projectIdsWriteUpdatedAt: Long = 0,
+
     @ColumnInfo(name = "recordedByUserId")
     val recordedByUserId: String? = null,
 

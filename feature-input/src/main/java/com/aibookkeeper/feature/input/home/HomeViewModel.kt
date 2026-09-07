@@ -17,6 +17,7 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerOption
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
@@ -63,7 +64,8 @@ data class HomeUiState(
     val selectedLedgerName: String = "个人账本",
     val canEditSelectedLedger: Boolean = true,
     val ledgerErrorMessage: String? = null,
-    val showFamilyTransactionAuthors: Boolean = false
+    val showFamilyTransactionAuthors: Boolean = false,
+    val ledgerSelectionVersion: Long = 0
 )
 
 sealed class AiStatus {
@@ -94,9 +96,11 @@ class HomeViewModel @Inject constructor(
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository,
     private val secureConfigStore: SecureConfigStore,
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager,
-    private val ledgerContext: LedgerContext
+    private val ledgerContext: LedgerContext,
+    projectRepository: ProjectRepository
 ) : ViewModel() {
 
+    val projectState = projectRepository.currentLedgerState
     private val _aiStatus = MutableStateFlow<AiStatus>(AiStatus.Idle)
     private val _voiceStatus = MutableStateFlow<VoiceStatus>(VoiceStatus.Idle)
     private val _customCloudPrompt = MutableStateFlow(secureConfigStore.getTextPrompt())
@@ -151,7 +155,8 @@ class HomeViewModel @Inject constructor(
             canEditSelectedLedger = ledgerState.canEdit,
             ledgerErrorMessage = ledgerState.errorMessage,
             showFamilyTransactionAuthors = ledgerState.isSignedIn &&
-                ledgerState.selectedLedger.mode == "FAMILY"
+                ledgerState.selectedLedger.mode == "FAMILY",
+            ledgerSelectionVersion = ledgerState.selectionVersion
         )
     }.stateIn(
         scope = viewModelScope,
@@ -163,10 +168,11 @@ class HomeViewModel @Inject constructor(
         ledgerContext.selectLedger(ledgerId)
     }
 
-    fun submitAiInput(text: String) {
+    fun submitAiInput(text: String, projectIds: List<String>? = null) {
         if (_aiStatus.value is AiStatus.Processing || _aiStatus.value is AiStatus.Success) return
         _aiStatus.value = AiStatus.Processing
         val selection = ledgerContext.state.value.selection
+        val selectedProjectIds = projectIds?.toList()
 
         viewModelScope.launch {
             try {
@@ -207,7 +213,8 @@ class HomeViewModel @Inject constructor(
                             source = TransactionSource.TEXT_AI,
                             status = TransactionStatus.CONFIRMED,
                             syncStatus = SyncStatus.LOCAL,
-                            aiConfidence = result.confidence
+                            aiConfidence = result.confidence,
+                            projectIds = selectedProjectIds
                         )
                         ledgerContext.requireEditable(selection)
                         transactionRepository.create(transaction).getOrThrow()

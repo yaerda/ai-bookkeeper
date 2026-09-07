@@ -19,6 +19,32 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(transactions: List<TransactionEntity>)
 
+    @androidx.room.Transaction
+    suspend fun insertValidated(transaction: TransactionEntity, beforePersist: () -> Unit): Long {
+        beforePersist()
+        return insert(transaction)
+    }
+
+    @androidx.room.Transaction
+    suspend fun insertAllValidated(
+        transactions: List<TransactionEntity>,
+        beforePersist: () -> Unit
+    ): List<Long> {
+        check(transactions.map { it.syncId }.distinct().size == transactions.size) { "批量账目编号重复" }
+        val ids = transactions.map { transaction ->
+            beforePersist()
+            insert(transaction).also { check(it > 0) { "批量账目保存失败" } }
+        }
+        beforePersist()
+        return ids
+    }
+
+    @androidx.room.Transaction
+    suspend fun updateValidated(transaction: TransactionEntity, beforePersist: () -> Unit) {
+        beforePersist()
+        updateMonotonic(transaction)
+    }
+
     // === Update ===
 
     @Update
@@ -40,7 +66,9 @@ interface TransactionDao {
             source = transaction.source,
             status = transaction.status,
             syncStatus = transaction.syncStatus,
-            aiConfidence = transaction.aiConfidence
+            aiConfidence = transaction.aiConfidence,
+            projectIdsState = transaction.projectIdsState,
+            projectIdsBlob = transaction.projectIdsBlob
         )
     }
 
@@ -56,6 +84,27 @@ interface TransactionDao {
             date = :date,
             createdAt = :createdAt,
             updatedAt = CASE
+                WHEN :updatedAt > updatedAt THEN :updatedAt
+                ELSE updatedAt + 1
+            END,
+            projectIdsState = CASE
+                WHEN :projectIdsState = 'UNSPECIFIED' THEN projectIdsState
+                ELSE :projectIdsState
+            END,
+            projectIdsBlob = CASE
+                WHEN :projectIdsState = 'UNSPECIFIED' THEN projectIdsBlob
+                ELSE :projectIdsBlob
+            END,
+            projectIdsWriteState = CASE
+                WHEN :projectIdsState = 'UNSPECIFIED' THEN projectIdsWriteState
+                ELSE :projectIdsState
+            END,
+            projectIdsWriteBlob = CASE
+                WHEN :projectIdsState = 'UNSPECIFIED' THEN projectIdsWriteBlob
+                ELSE :projectIdsBlob
+            END,
+            projectIdsWriteUpdatedAt = CASE
+                WHEN :projectIdsState = 'UNSPECIFIED' THEN projectIdsWriteUpdatedAt
                 WHEN :updatedAt > updatedAt THEN :updatedAt
                 ELSE updatedAt + 1
             END,
@@ -80,7 +129,9 @@ interface TransactionDao {
         source: String,
         status: String,
         syncStatus: String,
-        aiConfidence: Float?
+        aiConfidence: Float?,
+        projectIdsState: String,
+        projectIdsBlob: String?
     )
 
     @Query("""
@@ -95,7 +146,13 @@ interface TransactionDao {
     """)
     suspend fun updateStatus(id: Long, status: String, updatedAt: Long)
 
-    @Query("UPDATE transactions SET syncStatus = :syncStatus WHERE id = :id")
+    @Query("""
+        UPDATE transactions SET syncStatus = :syncStatus,
+            projectIdsWriteState = CASE WHEN :syncStatus = 'SYNCED' THEN 'UNSPECIFIED' ELSE projectIdsWriteState END,
+            projectIdsWriteBlob = CASE WHEN :syncStatus = 'SYNCED' THEN NULL ELSE projectIdsWriteBlob END,
+            projectIdsWriteUpdatedAt = CASE WHEN :syncStatus = 'SYNCED' THEN 0 ELSE projectIdsWriteUpdatedAt END
+        WHERE id = :id
+    """)
     suspend fun updateSyncStatus(id: Long, syncStatus: String)
 
     // === Delete ===
@@ -246,25 +303,61 @@ interface TransactionDao {
     @Query("""
         UPDATE transactions
         SET serverVersion = :serverVersion,
-            recordedByUserId = :recordedByUserId,
-            recordedByDisplayName = :recordedByDisplayName,
-            recordedByEmail = :recordedByEmail,
+            projectIdsState = CASE
+                WHEN projectIdsWriteUpdatedAt <= :expectedUpdatedAt THEN :projectIdsState
+                ELSE projectIdsState
+            END,
+            projectIdsBlob = CASE
+                WHEN projectIdsWriteUpdatedAt <= :expectedUpdatedAt THEN :projectIdsBlob
+                ELSE projectIdsBlob
+            END,
+            projectIdsWriteState = CASE
+                WHEN projectIdsWriteUpdatedAt <= :expectedUpdatedAt THEN 'UNSPECIFIED'
+                ELSE projectIdsWriteState
+            END,
+            projectIdsWriteBlob = CASE
+                WHEN projectIdsWriteUpdatedAt <= :expectedUpdatedAt THEN NULL
+                ELSE projectIdsWriteBlob
+            END,
+            projectIdsWriteUpdatedAt = CASE
+                WHEN projectIdsWriteUpdatedAt <= :expectedUpdatedAt THEN 0
+                ELSE projectIdsWriteUpdatedAt
+            END,
+            recordedByUserId = COALESCE(recordedByUserId, :recordedByUserId),
+            recordedByDisplayName = COALESCE(recordedByDisplayName, :recordedByDisplayName),
+            recordedByEmail = COALESCE(recordedByEmail, :recordedByEmail),
             syncStatus = CASE
                 WHEN updatedAt = :expectedUpdatedAt THEN 'SYNCED'
                 ELSE syncStatus
             END
         WHERE syncId = :syncId
           AND serverVersion = :expectedServerVersion
+          AND :serverVersion >= serverVersion
     """)
     suspend fun acknowledgeSync(
         syncId: String,
         expectedUpdatedAt: Long,
         expectedServerVersion: Long,
         serverVersion: Long,
+        projectIdsState: String,
+        projectIdsBlob: String?,
         recordedByUserId: String?,
         recordedByDisplayName: String?,
         recordedByEmail: String?
     ): Int
+
+    @Query(
+        """
+        SELECT EXISTS(
+            SELECT 1
+            FROM transactions
+            WHERE syncStatus = 'SYNCED'
+              AND projectIdsState = 'UNSPECIFIED'
+            LIMIT 1
+        )
+        """
+    )
+    suspend fun hasSyncedTransactionsMissingProjectMetadata(): Boolean
 
     @Query(
         """
@@ -286,12 +379,29 @@ interface TransactionDao {
         recordedByEmail: String?
     ): Int
 
+    @Query(
+        """
+        UPDATE transactions
+        SET projectIdsState = :projectIdsState,
+            projectIdsBlob = :projectIdsBlob
+        WHERE syncId = :syncId
+          AND syncStatus = 'SYNCED'
+          AND projectIdsState = 'UNSPECIFIED'
+        """
+    )
+    suspend fun refreshProjectMetadata(
+        syncId: String,
+        projectIdsState: String,
+        projectIdsBlob: String?
+    ): Int
+
     @Query("""
         UPDATE transactions
         SET serverVersion = :serverVersion
         WHERE syncId = :syncId
           AND serverVersion = :expectedServerVersion
           AND syncStatus != 'SYNCED'
+          AND :serverVersion > serverVersion
     """)
     suspend fun rebasePendingSync(
         syncId: String,
@@ -302,13 +412,19 @@ interface TransactionDao {
     @androidx.room.Transaction
     suspend fun mergeRemote(transaction: TransactionEntity): Boolean {
         val existing = getBySyncId(transaction.syncId)
-        if (existing != null && existing.syncStatus != "SYNCED") {
+        if (existing != null && (existing.syncStatus != "SYNCED" || existing.serverVersion > transaction.serverVersion)) {
             return false
         }
         insert(
             transaction.copy(
                 id = existing?.id ?: 0,
-                syncStatus = "SYNCED"
+                syncStatus = "SYNCED",
+                projectIdsWriteState = "UNSPECIFIED",
+                projectIdsWriteBlob = null,
+                projectIdsWriteUpdatedAt = 0,
+                recordedByUserId = existing?.recordedByUserId ?: transaction.recordedByUserId,
+                recordedByDisplayName = existing?.recordedByDisplayName ?: transaction.recordedByDisplayName,
+                recordedByEmail = existing?.recordedByEmail ?: transaction.recordedByEmail
             )
         )
         return true

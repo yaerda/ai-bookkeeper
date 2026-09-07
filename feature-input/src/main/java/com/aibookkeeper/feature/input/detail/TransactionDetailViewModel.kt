@@ -9,6 +9,7 @@ import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.normalizeCategoryName
 import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,11 +35,13 @@ class TransactionDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: com.aibookkeeper.core.data.repository.CategoryRepository,
-    private val ledgerContext: LedgerContext
+    private val ledgerContext: LedgerContext,
+    projectRepository: ProjectRepository
 ) : ViewModel() {
 
     private val transactionId: Long = savedStateHandle["transactionId"] ?: -1L
     val ledgerState = ledgerContext.state
+    val projectState = projectRepository.currentLedgerState
     private val transactionSelection = ledgerState.value.selection
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
@@ -62,7 +65,8 @@ class TransactionDetailViewModel @Inject constructor(
         categoryId: Long?,
         categoryName: String,
         note: String?,
-        date: java.time.LocalDateTime
+        date: java.time.LocalDateTime,
+        projectIds: List<String>? = null
     ) {
         val current = (uiState.value as? DetailUiState.Loaded)?.transaction ?: return
         viewModelScope.launch {
@@ -88,7 +92,8 @@ class TransactionDetailViewModel @Inject constructor(
                         categoryColor = category?.color ?: current.categoryColor,
                         note = note,
                         date = date,
-                        updatedAt = java.time.LocalDateTime.now()
+                        updatedAt = java.time.LocalDateTime.now(),
+                        projectIds = projectIds?.toList()
                     )
                 ).getOrThrow()
             }.onFailure(::showError)

@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -93,6 +95,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.aibookkeeper.feature.input.components.holdToTalkGesture
+import com.aibookkeeper.feature.input.components.ProjectSelectionSection
 import com.aibookkeeper.feature.input.components.joinTransactionMeta
 import com.aibookkeeper.feature.input.components.rememberSpeechInputSession
 import com.aibookkeeper.feature.input.components.SpeechPhase
@@ -110,6 +113,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val projectState by viewModel.projectState.collectAsStateWithLifecycle()
     var showAiSheet by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
     var showPromptReview by remember { mutableStateOf(false) }
@@ -385,6 +389,9 @@ fun HomeScreen(
     if (showAiSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var isImageOcrProcessing by remember { mutableStateOf(false) }
+        var projectIds by remember(uiState.selectedLedgerId, uiState.ledgerSelectionVersion) {
+            mutableStateOf<List<String>?>(null)
+        }
 
         val photoPickerLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.PickVisualMedia()
@@ -421,6 +428,7 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .padding(bottom = 32.dp)
             ) {
@@ -535,6 +543,16 @@ fun HomeScreen(
                     }
                 }
 
+                ProjectSelectionSection(
+                    state = projectState,
+                    selectedProjectIds = projectIds,
+                    onSelectedProjectIdsChange = { projectIds = it },
+                    unspecifiedLabel = "保存时按当前默认项目",
+                    enabled = uiState.aiStatus !is AiStatus.Processing &&
+                        uiState.aiStatus !is AiStatus.Success
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Unified AI button: tap = submit, long-press = voice input
                 speechState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (speechState.partialText.isNotBlank()) {
@@ -548,7 +566,7 @@ fun HomeScreen(
                     recordingLabel = recordingLabel,
                     onHoldReleased = speech::release,
                     onHoldCancelled = speech::cancel,
-                    onSubmit = { viewModel.submitAiInput(aiInput) },
+                    onSubmit = { viewModel.submitAiInput(aiInput, projectIds) },
                     onHoldStarted = {
                         if (uiState.voiceStatus is VoiceStatus.Processing) {
                             Toast.makeText(context, "正在识别中，请稍候", Toast.LENGTH_SHORT).show()

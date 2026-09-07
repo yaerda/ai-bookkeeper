@@ -98,6 +98,7 @@ import com.aibookkeeper.core.data.model.Category
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.input.home.VoiceStatus
 import com.aibookkeeper.feature.input.components.holdToTalkGesture
+import com.aibookkeeper.feature.input.components.ProjectSelectionSection
 import com.aibookkeeper.feature.input.components.rememberSpeechInputSession
 import com.aibookkeeper.feature.input.components.SpeechPhase
 import java.io.File
@@ -113,6 +114,7 @@ fun TextInputScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
+    val projectState by viewModel.projectState.collectAsStateWithLifecycle()
     val selection = ledgerState.selection
     val initialSelection = remember { selection }
     val context = LocalContext.current
@@ -162,8 +164,17 @@ fun TextInputScreen(
                             initialCategoryId = initialCategoryId.takeIf { selection == initialSelection },
                             viewModel = viewModel,
                             onSubmitText = { viewModel.submitText(it, selection) },
-                            onManualSave = { amount, categoryId, categoryName, note, type ->
-                                viewModel.saveManual(amount, categoryId, categoryName, note, type, selection)
+                            projectState = projectState,
+                            onManualSave = { amount, categoryId, categoryName, note, type, projectIds ->
+                                viewModel.saveManual(
+                                    amount,
+                                    categoryId,
+                                    categoryName,
+                                    note,
+                                    type,
+                                    selection,
+                                    projectIds
+                                )
                             },
                             onAddCategory = { name, icon, type ->
                                 viewModel.addCategory(name, icon, type, selection)
@@ -180,11 +191,14 @@ fun TextInputScreen(
                 }
                 is TextInputUiState.Preview -> {
                     val preview = uiState as TextInputUiState.Preview
-                    PreviewSection(
-                        preview = preview,
-                        onConfirm = viewModel::confirmSave,
-                        onRetry = viewModel::resetToIdle
-                    )
+                    key(selection) {
+                        PreviewSection(
+                            preview = preview,
+                            projectState = projectState,
+                            onConfirm = viewModel::confirmSave,
+                            onRetry = viewModel::resetToIdle
+                        )
+                    }
                 }
                 is TextInputUiState.Saving -> {
                     SavingSection()
@@ -218,7 +232,8 @@ private fun AiInputSection(
     initialCategoryId: Long? = null,
     viewModel: TextInputViewModel,
     onSubmitText: (String) -> Unit,
-    onManualSave: (Double, Long?, String, String?, TransactionType) -> Unit,
+    projectState: com.aibookkeeper.core.data.model.ProjectLedgerState,
+    onManualSave: (Double, Long?, String, String?, TransactionType, List<String>?) -> Unit,
     onAddCategory: (String, String, TransactionType) -> Unit = { _, _, _ -> },
     canUpdateCategories: Boolean = true,
     onUpdateCategory: (Category, String, String) -> Unit = { _, _, _ -> }
@@ -235,6 +250,9 @@ private fun AiInputSection(
     var newCategoryPresetIcon by remember { mutableStateOf(CategoryIconMapper.DEFAULT_ICON_KEY) }
     var newCategoryCustomEmoji by remember { mutableStateOf("") }
     var newCategoryType by remember { mutableStateOf(TransactionType.EXPENSE) }
+    var manualProjectIds by remember {
+        mutableStateOf<List<String>?>(null)
+    }
     var pendingVoiceRequest by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
@@ -479,8 +497,11 @@ private fun AiInputSection(
                 ) {
                     ManualInputForm(
                         categories = categories,
-                        onSave = { amount, catId, catName, note, type ->
-                            onManualSave(amount, catId, catName, note, type)
+                        projectState = projectState,
+                        selectedProjectIds = manualProjectIds,
+                        onSelectedProjectIdsChange = { manualProjectIds = it },
+                        onSave = { amount, catId, catName, note, type, projectIds ->
+                            onManualSave(amount, catId, catName, note, type, projectIds)
                             showManualForm = false
                         },
                         onOpenAddCategoryDialog = {
@@ -541,7 +562,10 @@ private fun AiInputSection(
 @Composable
 private fun ManualInputForm(
     categories: List<Category>,
-    onSave: (Double, Long?, String, String?, TransactionType) -> Unit,
+    projectState: com.aibookkeeper.core.data.model.ProjectLedgerState,
+    selectedProjectIds: List<String>?,
+    onSelectedProjectIdsChange: (List<String>?) -> Unit,
+    onSave: (Double, Long?, String, String?, TransactionType, List<String>?) -> Unit,
     onOpenAddCategoryDialog: (TransactionType) -> Unit = {},
     initialCategory: Category? = null
 ) {
@@ -588,7 +612,7 @@ private fun ManualInputForm(
                         amountText = newValue
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("manual-project-amount"),
                 label = { Text("金额") },
                 prefix = { Text("¥") },
                 singleLine = true,
@@ -646,14 +670,30 @@ private fun ManualInputForm(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            ProjectSelectionSection(
+                state = projectState,
+                selectedProjectIds = selectedProjectIds,
+                onSelectedProjectIdsChange = onSelectedProjectIdsChange,
+                unspecifiedLabel = "保存时按当前默认项目"
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Button(
                 onClick = {
                     val amount = amountText.toDoubleOrNull() ?: return@Button
                     val catName = selectedCategory?.name ?: "其他"
                     val type = if (isExpense) TransactionType.EXPENSE else TransactionType.INCOME
-                    onSave(amount, selectedCategory?.id, catName, note.ifBlank { null }, type)
+                    onSave(
+                        amount,
+                        selectedCategory?.id,
+                        catName,
+                        note.ifBlank { null },
+                        type,
+                        selectedProjectIds
+                    )
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("manual-project-save"),
                 enabled = amountText.toDoubleOrNull() != null && (amountText.toDoubleOrNull() ?: 0.0) > 0,
                 shape = RoundedCornerShape(12.dp)
             ) {
@@ -689,9 +729,13 @@ private fun ExtractingSection() {
 @Composable
 private fun PreviewSection(
     preview: TextInputUiState.Preview,
-    onConfirm: () -> Unit,
+    projectState: com.aibookkeeper.core.data.model.ProjectLedgerState,
+    onConfirm: (List<String>?) -> Unit,
     onRetry: () -> Unit
 ) {
+    var previewProjectIds by remember {
+        mutableStateOf<List<String>?>(null)
+    }
     Text(
         text = "✅ 识别结果",
         style = MaterialTheme.typography.titleLarge,
@@ -776,6 +820,15 @@ private fun PreviewSection(
 
     Spacer(modifier = Modifier.height(24.dp))
 
+    ProjectSelectionSection(
+        state = projectState,
+        selectedProjectIds = previewProjectIds,
+        onSelectedProjectIdsChange = { previewProjectIds = it },
+        unspecifiedLabel = "保存时按当前默认项目"
+    )
+
+    Spacer(modifier = Modifier.height(24.dp))
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -788,8 +841,8 @@ private fun PreviewSection(
             Text("重新输入")
         }
         Button(
-            onClick = onConfirm,
-            modifier = Modifier.weight(1f),
+            onClick = { onConfirm(previewProjectIds) },
+            modifier = Modifier.weight(1f).testTag("preview-project-save"),
             shape = RoundedCornerShape(12.dp)
         ) {
             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))

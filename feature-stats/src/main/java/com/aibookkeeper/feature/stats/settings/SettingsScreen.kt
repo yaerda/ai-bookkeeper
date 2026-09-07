@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
@@ -60,6 +61,7 @@ fun SettingsScreen(
     onNotificationServiceToggle: (Boolean) -> Unit = {},
     onCloudSyncClick: () -> Unit = {},
     onFamilyLedgerClick: () -> Unit = {},
+    onProjectsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -235,6 +237,21 @@ fun SettingsScreen(
                 title = "账本与家庭管理",
                 subtitle = "切换模式、邀请成员并设置查看或编辑权限",
                 onClick = onFamilyLedgerClick
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            SettingsNavigationRow(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = "项目管理",
+                subtitle = "创建项目、设置默认生效账本和查看项目统计",
+                onClick = onProjectsClick
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

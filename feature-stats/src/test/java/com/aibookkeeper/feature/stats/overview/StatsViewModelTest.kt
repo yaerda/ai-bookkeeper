@@ -2,11 +2,22 @@ package com.aibookkeeper.feature.stats.overview
 
 import app.cash.turbine.test
 import com.aibookkeeper.core.data.model.CategoryExpense
+import com.aibookkeeper.core.data.model.ProjectBinding
+import com.aibookkeeper.core.data.model.ProjectLedgerState
+import com.aibookkeeper.core.data.model.SyncStatus
+import com.aibookkeeper.core.data.model.Transaction
+import com.aibookkeeper.core.data.model.TransactionSource
+import com.aibookkeeper.core.data.model.TransactionStatus
+import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.repository.ProjectRepository
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -24,10 +35,16 @@ class StatsViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
+    private val projectRepository: ProjectRepository = mockk()
+    private val ledgerContext: LedgerContext = mockk()
+    private val ledgerState = MutableStateFlow(LedgerContextState())
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(ProjectLedgerState())
+        every { ledgerContext.state } returns ledgerState
+        every { transactionRepository.observeExpenseBreakdown(any()) } returns flowOf(emptyList())
     }
 
     @AfterEach
@@ -36,15 +53,102 @@ class StatsViewModelTest {
     }
 
     private fun createViewModel(
-        expense: Double = 0.0,
-        income: Double = 0.0,
-        breakdown: List<CategoryExpense> = emptyList()
+        transactions: List<Transaction> = emptyList()
     ): StatsViewModel {
-        every { transactionRepository.observeMonthlyExpense(any()) } returns flowOf(expense)
-        every { transactionRepository.observeMonthlyIncome(any()) } returns flowOf(income)
-        every { transactionRepository.observeExpenseBreakdown(any()) } returns flowOf(breakdown)
+        every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
 
-        return StatsViewModel(transactionRepository)
+        return StatsViewModel(transactionRepository, projectRepository, ledgerContext)
+    }
+
+    private fun transaction(
+        amount: Double,
+        type: TransactionType,
+        categoryId: Long? = if (type == TransactionType.EXPENSE) 1L else 2L,
+        categoryName: String? = if (type == TransactionType.EXPENSE) "餐饮" else "工资",
+        projectIds: List<String>? = null
+    ) = Transaction(
+        id = amount.toLong(),
+        amount = amount,
+        type = type,
+        categoryId = categoryId,
+        categoryName = categoryName,
+        categoryColor = if (type == TransactionType.EXPENSE) "#FF5722" else "#4CAF50",
+        date = java.time.LocalDateTime.of(2026, 9, 8, 9, 0),
+        createdAt = java.time.LocalDateTime.of(2026, 9, 8, 9, 0),
+        updatedAt = java.time.LocalDateTime.of(2026, 9, 8, 9, 0),
+        source = TransactionSource.MANUAL,
+        status = TransactionStatus.CONFIRMED,
+        syncStatus = SyncStatus.SYNCED,
+        projectIds = projectIds
+    )
+
+    @Test
+    fun `project statistics retain Room category labels and colors`() = runTest {
+        every { transactionRepository.observeExpenseBreakdown(any()) } returns flowOf(
+            listOf(CategoryExpense(1, "本地餐饮", "#123456", 30.0, 1f))
+        )
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            ProjectLedgerState(
+                ledgerId = ledgerState.value.selectedLedgerId,
+                projects = listOf(ProjectBinding("p1", ledgerState.value.selectedLedgerId, "旅行", true, null, null, "Asia/Shanghai", 1, true, true))
+            )
+        )
+        val vm = createViewModel(listOf(
+            transaction(10.0, TransactionType.EXPENSE, categoryName = null, projectIds = listOf("p1")).copy(categoryColor = null),
+            transaction(20.0, TransactionType.EXPENSE, categoryName = null)
+        ))
+        vm.uiState.test {
+            awaitItem()
+            val unfiltered = awaitItem()
+            assertEquals("本地餐饮", unfiltered.categoryBreakdown.single().categoryName)
+            vm.selectProject("p1")
+            val filtered = awaitItem()
+            assertEquals(10.0, filtered.monthExpense)
+            assertEquals("本地餐饮", filtered.categoryBreakdown.single().categoryName)
+            assertEquals("#123456", filtered.categoryBreakdown.single().categoryColor)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `uncatalogued shared categories use distinct repository-compatible keys`() = runTest {
+        val vm = createViewModel(listOf(
+            transaction(10.0, TransactionType.EXPENSE, categoryId = null, categoryName = "Alpha"),
+            transaction(20.0, TransactionType.EXPENSE, categoryId = null, categoryName = "Beta")
+        ))
+        vm.uiState.test {
+            awaitItem()
+            val loaded = awaitItem()
+            assertEquals(2, loaded.categoryBreakdown.map { it.categoryId }.distinct().size)
+            assertEquals(setOf(-"Alpha".hashCode().toLong(), -"Beta".hashCode().toLong()), loaded.categoryBreakdown.map { it.categoryId }.toSet())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ledger change clears unavailable project filter before new projects load`() = runTest {
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            ProjectLedgerState(
+                ledgerId = ledgerState.value.selectedLedgerId,
+                projects = listOf(ProjectBinding("p1", ledgerState.value.selectedLedgerId, "旅行", true, null, null, "Asia/Shanghai", 1, true, true))
+            )
+        )
+        val vm = createViewModel(listOf(
+            transaction(10.0, TransactionType.EXPENSE, projectIds = listOf("p1")),
+            transaction(20.0, TransactionType.EXPENSE)
+        ))
+        vm.uiState.test {
+            awaitItem()
+            awaitItem()
+            vm.selectProject("p1")
+            assertEquals(10.0, awaitItem().monthExpense)
+            ledgerState.value = ledgerState.value.copy(selectedLedgerId = "other", selectionVersion = 1)
+            val changed = awaitItem()
+            assertNull(changed.selectedProjectId)
+            assertTrue(changed.availableProjects.isEmpty())
+            assertEquals(30.0, changed.monthExpense)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -81,7 +185,12 @@ class StatsViewModelTest {
 
         @Test
         fun should_showExpenseAndIncome_when_dataLoaded() = runTest {
-            val vm = createViewModel(expense = 3000.0, income = 8000.0)
+            val vm = createViewModel(
+                transactions = listOf(
+                    transaction(3000.0, TransactionType.EXPENSE),
+                    transaction(8000.0, TransactionType.INCOME)
+                )
+            )
 
             vm.uiState.test {
                 awaitItem() // initial
@@ -95,7 +204,12 @@ class StatsViewModelTest {
 
         @Test
         fun should_calculateBalance_when_dataLoaded() = runTest {
-            val vm = createViewModel(expense = 3000.0, income = 8000.0)
+            val vm = createViewModel(
+                transactions = listOf(
+                    transaction(3000.0, TransactionType.EXPENSE),
+                    transaction(8000.0, TransactionType.INCOME)
+                )
+            )
 
             vm.uiState.test {
                 awaitItem()
@@ -107,7 +221,12 @@ class StatsViewModelTest {
 
         @Test
         fun should_showNegativeBalance_when_expenseExceedsIncome() = runTest {
-            val vm = createViewModel(expense = 10000.0, income = 5000.0)
+            val vm = createViewModel(
+                transactions = listOf(
+                    transaction(10000.0, TransactionType.EXPENSE),
+                    transaction(5000.0, TransactionType.INCOME)
+                )
+            )
 
             vm.uiState.test {
                 awaitItem()
@@ -119,18 +238,59 @@ class StatsViewModelTest {
 
         @Test
         fun should_showCategoryBreakdown_when_dataLoaded() = runTest {
-            val breakdown = listOf(
-                CategoryExpense(1, "餐饮", "#FF5722", 1200.0, 0.4f),
-                CategoryExpense(2, "交通", "#2196F3", 600.0, 0.2f),
-                CategoryExpense(3, "购物", "#4CAF50", 1200.0, 0.4f)
+            val vm = createViewModel(
+                transactions = listOf(
+                    transaction(1200.0, TransactionType.EXPENSE, 1L, "餐饮"),
+                    transaction(600.0, TransactionType.EXPENSE, 2L, "交通"),
+                    transaction(1200.0, TransactionType.EXPENSE, 3L, "购物")
+                )
             )
-            val vm = createViewModel(expense = 3000.0, breakdown = breakdown)
 
             vm.uiState.test {
                 awaitItem()
                 val loaded = awaitItem()
                 assertEquals(3, loaded.categoryBreakdown.size)
                 assertEquals("餐饮", loaded.categoryBreakdown[0].categoryName)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_filterBySelectedProject_withoutDoubleCountingMultiTagTransactions() = runTest {
+            every { projectRepository.currentLedgerState } returns MutableStateFlow(
+                ProjectLedgerState(
+                    ledgerId = ledgerState.value.selectedLedgerId,
+                    projects = listOf(
+                        com.aibookkeeper.core.data.model.ProjectBinding(
+                            projectId = "p1",
+                            ledgerId = "l1",
+                            name = "装修",
+                            enabled = true,
+                            startDate = null,
+                            endDate = null,
+                            timeZone = "Asia/Shanghai",
+                            version = 1,
+                            active = true,
+                            canEdit = true
+                        )
+                    )
+                )
+            )
+            val vm = createViewModel(
+                transactions = listOf(
+                    transaction(100.0, TransactionType.EXPENSE, 1L, "餐饮", listOf("p1", "p2")),
+                    transaction(50.0, TransactionType.EXPENSE, 2L, "交通", listOf("p1")),
+                    transaction(25.0, TransactionType.EXPENSE, 3L, "购物", listOf("p2"))
+                )
+            )
+
+            vm.uiState.test {
+                awaitItem()
+                awaitItem()
+                vm.selectProject("p1")
+                val filtered = awaitItem()
+                assertEquals(150.0, filtered.monthExpense)
+                assertEquals(2, filtered.categoryBreakdown.size)
                 cancelAndIgnoreRemainingEvents()
             }
         }

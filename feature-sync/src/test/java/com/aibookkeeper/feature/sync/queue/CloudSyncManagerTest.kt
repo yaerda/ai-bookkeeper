@@ -8,6 +8,8 @@ import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.feature.sync.auth.AccessToken
+import com.aibookkeeper.feature.sync.auth.AuthManager
+import com.aibookkeeper.feature.sync.auth.AuthState
 import com.aibookkeeper.feature.sync.auth.AuthenticationRequiredException
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.feature.sync.network.PullResponse
@@ -23,6 +25,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -84,6 +87,7 @@ class CloudSyncManagerTest {
         status = local.status.name,
         aiConfidence = null,
         deletedAt = null,
+        projectIds = emptyList(),
         recordedByUserId = "owner-user",
         recordedByDisplayName = "Cloud Owner",
         recordedByEmail = "owner@example.com"
@@ -91,6 +95,7 @@ class CloudSyncManagerTest {
 
     @BeforeEach
     fun setUp() {
+        every { preferences.boundAccountId } returns MutableStateFlow("account-a")
         manager = CloudSyncManager(
             repository,
             api,
@@ -104,6 +109,8 @@ class CloudSyncManagerTest {
         coEvery { categorySync.syncDefault(any()) } returns emptyList()
         every { preferences.isRecordedByMetadataRefreshComplete(any()) } returns true
         every { preferences.markRecordedByMetadataRefreshComplete(any()) } returns Unit
+        every { preferences.isProjectMetadataRefreshComplete(any()) } returns true
+        every { preferences.markProjectMetadataRefreshComplete(any()) } returns Unit
     }
 
     @Test
@@ -125,6 +132,51 @@ class CloudSyncManagerTest {
         val failure = runCatching { manager.syncNow() }.exceptionOrNull()
 
         assertInstanceOf(CancellationException::class.java, failure)
+    }
+
+    @Test
+    fun `logout during default ledger pull cannot merge rows or advance cursor`() = runTest {
+        signedIn()
+        val auth = mockk<AuthManager>()
+        val authState = MutableStateFlow<AuthState>(AuthState.SignedIn("account-a", "a@example.com"))
+        every { auth.state } returns authState
+        coEvery { auth.acquireToken() } returns AccessToken("token", "account-a")
+        coEvery { repository.getPendingSync() } returns emptyList()
+        every { preferences.cursor() } returns 0
+        coEvery { api.pull(any(), any(), any()) } answers {
+            authState.value = AuthState.SignedOut
+            Response.success(PullResponse(listOf(remote), 11, false))
+        }
+        val guarded = CloudSyncManager(repository, api, auth, preferences, json, categorySync)
+        assertInstanceOf(AuthenticationRequiredException::class.java, guarded.syncNow().exceptionOrNull())
+        coVerify(exactly = 0) { repository.mergeRemote(any()) }
+        verify(exactly = 0) { preferences.updateCursor(any()) }
+    }
+
+    @Test
+    fun `conflict retries preserve null empty and explicit project write intent`() = runTest {
+        signedIn()
+        every { preferences.cursor() } returns 0
+        every { preferences.updateCursor(any()) } returns Unit
+        coEvery { api.pull(any(), any(), any()) } returns Response.success(PullResponse(emptyList(), 12, false))
+        coEvery { repository.rebasePendingSync(any(), any(), any()) } returns true
+        coEvery { repository.acknowledgeSynced(any(), any(), any(), any(), any(), any(), any(), any()) } returns true
+        for (intent in listOf<List<String>?>(null, emptyList(), listOf("picked"))) {
+            val pending = local.copy(projectIds = intent)
+            val requests = mutableListOf<PushRequest>()
+            coEvery { repository.getPendingSync() } returnsMany listOf(
+                listOf(pending), listOf(pending.copy(serverVersion = 11))
+            )
+            var attempt = 0
+            coEvery { api.push(any(), capture(requests)) } answers {
+                if (attempt++ == 0) Response.success(PushResponse(emptyList(), listOf(remote)))
+                else Response.success(PushResponse(listOf(remote.copy(serverVersion = 12, projectIds = intent ?: emptyList())), emptyList()))
+            }
+            manager.syncNow().getOrThrow()
+            assertEquals(2, requests.size)
+            assertEquals(intent, requests[0].transactions.single().projectIds)
+            assertEquals(intent, requests[1].transactions.single().projectIds)
+        }
     }
 
     @Test
@@ -159,6 +211,8 @@ class CloudSyncManagerTest {
         every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
         coEvery { repository.needsRecordedByMetadataRefresh() } returns true
         coEvery { repository.refreshRecordedByMetadata(any()) } returnsMany listOf(true, false)
+        every { preferences.isProjectMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsProjectMetadataRefresh() } returns false
         coEvery { repository.getPendingSync() } returns emptyList()
         coEvery { api.pull(any(), 0, 500) } returns Response.success(
             PullResponse(listOf(remote), nextCursor = 11, hasMore = true)
@@ -183,6 +237,7 @@ class CloudSyncManagerTest {
             repository.refreshRecordedByMetadata(match { it.syncId == "other" })
         }
         verify { preferences.markRecordedByMetadataRefreshComplete("account-a") }
+        verify { preferences.markProjectMetadataRefreshComplete("account-a") }
         verify(exactly = 1) { preferences.updateCursor(7) }
     }
 
@@ -191,6 +246,8 @@ class CloudSyncManagerTest {
         signedIn()
         every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
         coEvery { repository.needsRecordedByMetadataRefresh() } returns false
+        every { preferences.isProjectMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsProjectMetadataRefresh() } returns false
         coEvery { repository.getPendingSync() } returns emptyList()
         every { preferences.cursor() } returns 3
         coEvery { api.pull(any(), 3, 200) } returns Response.success(
@@ -201,6 +258,7 @@ class CloudSyncManagerTest {
         manager.syncNow().getOrThrow()
 
         verify { preferences.markRecordedByMetadataRefreshComplete("account-a") }
+        verify { preferences.markProjectMetadataRefreshComplete("account-a") }
         coVerify(exactly = 0) { repository.refreshRecordedByMetadata(any()) }
         coVerify(exactly = 0) { api.pull(any(), 0, 500) }
     }
@@ -210,6 +268,8 @@ class CloudSyncManagerTest {
         signedIn()
         every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
         coEvery { repository.needsRecordedByMetadataRefresh() } returns true
+        every { preferences.isProjectMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsProjectMetadataRefresh() } returns true
         coEvery { api.pull(any(), 0, 500) } returns Response.error(
             503,
             "{}".toResponseBody("application/json".toMediaType())
@@ -219,6 +279,7 @@ class CloudSyncManagerTest {
 
         assertInstanceOf(RetryableSyncException::class.java, failure)
         verify(exactly = 0) { preferences.markRecordedByMetadataRefreshComplete(any()) }
+        verify(exactly = 0) { preferences.markProjectMetadataRefreshComplete(any()) }
         coVerify(exactly = 0) { repository.getPendingSync() }
         verify(exactly = 0) { preferences.updateCursor(any()) }
     }
@@ -236,6 +297,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 0,
                 11,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -262,6 +324,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 0,
                 11,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -283,6 +346,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 0,
                 11,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -313,6 +377,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 0,
                 11,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -360,6 +425,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 11,
                 12,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -378,6 +444,7 @@ class CloudSyncManagerTest {
                 local.updatedAt,
                 11,
                 12,
+                emptyList(),
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -528,7 +595,7 @@ class CloudSyncManagerTest {
             )
         }
         coEvery {
-            repository.acknowledgeSynced(any(), any(), any(), any(), any(), any(), any())
+            repository.acknowledgeSynced(any(), any(), any(), any(), any(), any(), any(), any())
         } returns true
         emptyPull()
 
@@ -576,6 +643,7 @@ class CloudSyncManagerTest {
                 valid.updatedAt,
                 0,
                 9,
+                null,
                 "owner-user",
                 "Cloud Owner",
                 "owner@example.com"
@@ -589,6 +657,24 @@ class CloudSyncManagerTest {
         assertEquals(1, report.failed)
         assertEquals(setOf(local.syncId), report.failedSyncIds)
         coVerify(exactly = 3) { api.push(any(), any()) }
+    }
+
+    @Test
+    fun `accepts idempotent acknowledgement at an unchanged positive version`() = runTest {
+        signedIn()
+        val pending = local.copy(serverVersion = remote.serverVersion)
+        coEvery { repository.getPendingSync() } returns listOf(pending)
+        coEvery { api.push(any(), any()) } returns Response.success(
+            PushResponse(listOf(remote), emptyList())
+        )
+        coEvery {
+            repository.acknowledgeSynced(
+                pending.syncId, pending.updatedAt, pending.serverVersion, remote.serverVersion,
+                remote.projectIds, remote.recordedByUserId, remote.recordedByDisplayName, remote.recordedByEmail
+            )
+        } returns true
+        emptyPull()
+        assertEquals(1, manager.syncNow().getOrThrow().uploaded)
     }
 
     @Test

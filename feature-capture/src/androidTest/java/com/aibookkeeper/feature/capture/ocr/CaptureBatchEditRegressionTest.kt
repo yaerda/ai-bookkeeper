@@ -4,7 +4,15 @@ import android.content.Context
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.widget.Toast
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -13,12 +21,12 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
-import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.navigation.compose.rememberNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -28,9 +36,14 @@ import com.aibookkeeper.core.data.ai.ExtractionStrategyManager
 import com.aibookkeeper.core.data.local.dao.CategoryDao
 import com.aibookkeeper.core.data.local.entity.CategoryEntity
 import com.aibookkeeper.core.data.model.ExtractionResult
+import com.aibookkeeper.core.data.model.ProjectBinding
+import com.aibookkeeper.core.data.model.ProjectDefaultsAvailability
+import com.aibookkeeper.core.data.model.ProjectLedgerState
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.VisionExtractionResult
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.ProjectRepository
+import com.aibookkeeper.core.data.repository.ProjectWriteDestination
 import com.aibookkeeper.feature.capture.test.R
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -46,12 +59,14 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @RunWith(AndroidJUnit4::class)
 class CaptureBatchEditRegressionTest {
     @get:Rule val compose = createComposeRule()
 
     private val saved = CopyOnWriteArrayList<Transaction>()
+    private val projectState = MutableStateFlow(ProjectLedgerState())
     private val text = "午餐 ¥26.00\n公交 ¥3.00\n工资 ¥50.00"
     private val items = listOf(
         item(26.0, "EXPENSE", "餐饮", "午餐", "2026-09-01"),
@@ -76,6 +91,16 @@ class CaptureBatchEditRegressionTest {
             override suspend fun create(transaction: Transaction): Result<Long> {
                 saved.add(transaction)
                 return Result.success(saved.size.toLong())
+            }
+            override suspend fun createAllValidated(
+                transactions: List<Transaction>,
+                beforePersist: () -> Unit
+            ): Result<List<Long>> {
+                transactions.forEach { beforePersist() }
+                beforePersist()
+                val offset = saved.size
+                saved.addAll(transactions)
+                return Result.success(transactions.indices.map { offset + it + 1L })
             }
         }
         val categories = listOf(
@@ -103,6 +128,12 @@ class CaptureBatchEditRegressionTest {
         every { entryPoint.extractionStrategyManager() } returns strategy
         every { entryPoint.extractionCategoryProvider() } returns categoryProvider
         every { entryPoint.categoryDao() } returns dao
+        val projects = mockk<ProjectRepository>()
+        val destination = ProjectWriteDestination("synthetic-account", "default", defaultRoom = true, contextVersion = 1)
+        every { projects.defaultLedgerState } returns projectState
+        every { projects.captureDestination(true) } returns destination
+        every { projects.requireCurrentDestination(destination) } returns Unit
+        every { entryPoint.projectRepository() } returns projects
 
         val context = InstrumentationRegistry.getInstrumentation().context
         val imageUri = "android.resource://${context.packageName}/${R.drawable.capture_fixture}"
@@ -127,7 +158,7 @@ class CaptureBatchEditRegressionTest {
     }
 
     private fun saveAndAwaitCompletion(label: String) {
-        compose.onNodeWithText(label).performClick()
+        compose.onNodeWithText(label).performScrollTo().performClick()
         compose.waitUntil(10_000) {
             compose.onAllNodes(hasText("识别结果")).fetchSemanticsNodes().isEmpty()
         }
@@ -136,6 +167,17 @@ class CaptureBatchEditRegressionTest {
     @Test
     fun closeCommitsDeletionsAndEditsThroughReopenAndRepositorySave() {
         launchRecognition()
+        compose.onNodeWithText("不关联项目").performScrollTo().performClick()
+        compose.runOnIdle {
+            projectState.value = ProjectLedgerState(
+                accountId = "synthetic-account", ledgerId = "default", role = "OWNER", contextVersion = 1,
+                availability = ProjectDefaultsAvailability.LIVE,
+                projects = listOf(ProjectBinding(
+                    "11111111-1111-4111-8111-111111111111", "default", "Loaded project",
+                    true, null, null, "Asia/Shanghai", 1, true, true
+                ))
+            )
+        }
         val edited = "午餐 ¥28.50\n本月奖金 ¥60.00"
         editText("午餐 ¥28.50\n工资 ¥55.00")
         compose.onNodeWithTag("capture-text-editor").performTextReplacement(edited)
@@ -159,6 +201,7 @@ class CaptureBatchEditRegressionTest {
         assertEquals(listOf("EXPENSE", "INCOME"), saved.map { it.type.name })
         assertTrue(saved.all { it.originalInput == edited })
         assertTrue(saved.all { it.date.toLocalDate().toString() == "2026-09-06" })
+        assertTrue(saved.all { it.projectIds == emptyList<String>() })
         assertEquals(2, saved.size)
     }
 
@@ -199,7 +242,7 @@ class CaptureBatchEditRegressionTest {
         )
         compose.onNodeWithText("完成").performClick()
         compose.onNodeWithText("✨ AI记账").assertIsNotEnabled()
-        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithTag("capture-split-mode").performClick()
         compose.onNodeWithText("✨ AI记账").assertIsNotEnabled()
         assertTrue(saved.isEmpty())
     }
@@ -223,13 +266,13 @@ class CaptureBatchEditRegressionTest {
     @Test
     fun pendingInlineUpdateCannotResurrectRowsAfterTheEditorCloses() {
         launchRecognition()
-        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithTag("capture-split-mode").performClick()
         compose.onNode(hasSetTextAction()).performTextReplacement("午餐 ¥28.50\n公交 ¥3.00\n工资 ¥50.00")
         compose.onNodeWithText("编辑").performClick()
         compose.onNodeWithTag("capture-text-editor").performTextReplacement("工资 ¥60.00")
         compose.onNodeWithContentDescription("关闭").performClick()
         SystemClock.sleep(1_200)
-        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithTag("capture-split-mode").performClick()
         saveAndAwaitCompletion("✨ AI记账")
 
         assertEquals(listOf("工资"), saved.map { it.note })
@@ -243,4 +286,28 @@ class CaptureBatchEditRegressionTest {
 
     private fun category(id: Long, name: String, type: String) =
         CategoryEntity(id = id, name = name, icon = "ic_other", color = "#607D8B", type = type)
+
+    @Test
+    fun narrowPickerKeepsEveryHistoricalProjectReachable() {
+        val bindings = (1..12).map { index ->
+            ProjectBinding(
+                java.util.UUID.nameUUIDFromBytes("project-$index".toByteArray()).toString(),
+                "default", "Historical project number $index", false, null, null, "Asia/Shanghai",
+                1, false, true
+            )
+        }
+        val selection = mutableStateOf<List<String>?>(emptyList())
+        compose.setContent {
+            MaterialTheme {
+                Column(Modifier.width(240.dp).heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    CaptureProjectSelectionSection(
+                        ProjectLedgerState(projects = bindings, availability = ProjectDefaultsAvailability.LIVE),
+                        selection.value, { selection.value = it }
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText(bindings.last().name, substring = true).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf(bindings.last().projectId), selection.value) }
+    }
 }

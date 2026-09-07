@@ -2,9 +2,12 @@ package com.aibookkeeper.feature.input.bills
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aibookkeeper.core.data.model.ProjectBinding
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerSelection
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,30 +39,42 @@ data class BillsUiState(
     val availableMonths: List<TransactionMonthSummary> = emptyList(),
     val dayGroups: List<DayGroup> = emptyList(),
     val isLoading: Boolean = true,
-    val showFamilyTransactionAuthors: Boolean = false
+    val showFamilyTransactionAuthors: Boolean = false,
+    val availableProjects: List<ProjectBinding> = emptyList(),
+    val selectedProjectId: String? = null,
+    val projectStateMessage: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class BillsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val ledgerContext: LedgerContext
+    private val ledgerContext: LedgerContext,
+    projectRepository: ProjectRepository
 ) : ViewModel() {
 
     private val _currentMonth = MutableStateFlow(YearMonth.now())
+    private val _projectFilter = MutableStateFlow<Pair<LedgerSelection, String>?>(null)
+    private val projectState = projectRepository.currentLedgerState
 
     val uiState: StateFlow<BillsUiState> = _currentMonth.flatMapLatest { month ->
         combine(
             transactionRepository.observeByMonth(month),
-            transactionRepository.observeMonthlyExpense(month),
-            transactionRepository.observeMonthlyIncome(month),
             transactionRepository.observeTransactionMonths(),
-            ledgerContext.state
-        ) { transactions, expense, income, availableMonths, ledgerState ->
+            ledgerContext.state,
+            projectState,
+            _projectFilter
+        ) { transactions, availableMonths, ledgerState, projectLedgerState, projectFilter ->
+            val availableProjects = projectLedgerState.projects.takeIf {
+                projectLedgerState.ledgerId == ledgerState.selectedLedgerId
+            }.orEmpty()
+            val selectedProjectId = projectFilter?.takeIf { it.first == ledgerState.selection }
+                ?.second?.takeIf { id -> availableProjects.any { it.projectId == id } }
             val today = LocalDate.now()
             val yesterday = today.minusDays(1)
+            val filteredTransactions = transactions.filterByProject(selectedProjectId)
 
-            val grouped = transactions
+            val grouped = filteredTransactions
                 .groupBy { it.date.toLocalDate() }
                 .toSortedMap(compareByDescending { it })
                 .map { (date, txList) ->
@@ -79,13 +94,20 @@ class BillsViewModel @Inject constructor(
 
             BillsUiState(
                 currentMonth = month,
-                monthExpense = expense,
-                monthIncome = income,
+                monthExpense = filteredTransactions
+                    .filter { it.type == TransactionType.EXPENSE }
+                    .sumOf { it.amount },
+                monthIncome = filteredTransactions
+                    .filter { it.type == TransactionType.INCOME }
+                    .sumOf { it.amount },
                 availableMonths = availableMonths,
                 dayGroups = grouped,
                 isLoading = false,
                 showFamilyTransactionAuthors = ledgerState.isSignedIn &&
-                    ledgerState.selectedLedger.mode == "FAMILY"
+                    ledgerState.selectedLedger.mode == "FAMILY",
+                availableProjects = availableProjects,
+                selectedProjectId = selectedProjectId,
+                projectStateMessage = projectLedgerState.errorMessage
             )
         }
     }.stateIn(
@@ -108,6 +130,10 @@ class BillsViewModel @Inject constructor(
         }
     }
 
+    fun selectProject(projectId: String?) {
+        _projectFilter.value = projectId?.let { ledgerContext.state.value.selection to it }
+    }
+
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
             transactionRepository.delete(id)
@@ -119,4 +145,11 @@ class BillsViewModel @Inject constructor(
             transactionRepository.create(transaction)
         }
     }
+
+    private fun List<Transaction>.filterByProject(projectId: String?): List<Transaction> =
+        if (projectId == null) {
+            this
+        } else {
+            filter { projectId in (it.projectIds ?: emptyList()) }
+        }
 }

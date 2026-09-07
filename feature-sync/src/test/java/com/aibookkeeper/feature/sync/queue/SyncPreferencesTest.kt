@@ -109,4 +109,53 @@ class SyncPreferencesTest {
         assertFalse(restored.isRecordedByMetadataRefreshComplete("account-b"))
         verify { editor.putBoolean("recorded_by_refresh_complete:account-a", true) }
     }
+
+    @Test
+    fun `project metadata refresh and cache stay isolated per account and ledger`() {
+        val strings = mutableMapOf<String, String?>("bound_account_id" to "account-a")
+        val booleans = mutableMapOf<String, Boolean>()
+        val longs = mutableMapOf<String, Long>()
+        every { context.getSharedPreferences("cloud_sync", Context.MODE_PRIVATE) } returns preferences
+        every { preferences.getString(any(), any()) } answers {
+            strings[firstArg<String>()] ?: secondArg<String?>()
+        }
+        every { preferences.getBoolean(any(), any()) } answers {
+            booleans[firstArg<String>()] ?: secondArg<Boolean>()
+        }
+        every { preferences.contains(any()) } answers {
+            val key = firstArg<String>()
+            longs.containsKey(key)
+        }
+        every { preferences.getLong(any(), any()) } answers {
+            longs[firstArg<String>()] ?: secondArg<Long>()
+        }
+        every { preferences.edit() } returns editor
+        every { editor.putBoolean(any(), any()) } answers {
+            booleans[firstArg<String>()] = secondArg<Boolean>()
+            editor
+        }
+        every { editor.putString(any(), any()) } answers {
+            strings[firstArg<String>()] = secondArg<String?>()
+            editor
+        }
+        every { editor.putLong(any(), any()) } answers {
+            longs[firstArg<String>()] = secondArg<Long>()
+            editor
+        }
+        every { editor.apply() } returns Unit
+
+        val prefs = SyncPreferences(context)
+        prefs.markProjectMetadataRefreshComplete("account-a")
+        prefs.updateProjectCache("account-a", "ledger-1", "{\"projects\":[]}", 123L)
+
+        val restored = SyncPreferences(context)
+
+        assertTrue(restored.isProjectMetadataRefreshComplete("account-a"))
+        assertFalse(restored.isProjectMetadataRefreshComplete("account-b"))
+        assertEquals("{\"projects\":[]}", restored.projectCacheJson("account-a", "ledger-1"))
+        assertEquals(123L, restored.projectCacheRefreshedAt("account-a", "ledger-1"))
+        assertNull(restored.projectCacheJson("account-a", "ledger-2"))
+        verify { editor.putBoolean("project_metadata_refresh_complete:account-a", true) }
+        verify { editor.putString("project_cache:account-a:ledger-1", "{\"projects\":[]}") }
+    }
 }

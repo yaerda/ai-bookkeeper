@@ -26,6 +26,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -90,6 +91,32 @@ fun StatsScreen(
                 )
             }
 
+            if (uiState.availableProjects.isNotEmpty() || uiState.selectedProjectId != null) {
+                item {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            Spacer(modifier = Modifier.width(16.dp))
+                            FilterChip(
+                                selected = uiState.selectedProjectId == null,
+                                onClick = { viewModel.selectProject(null) },
+                                label = { Text("全部项目") }
+                            )
+                        }
+                        items(uiState.availableProjects, key = { it.projectId }) { project ->
+                            FilterChip(
+                                selected = uiState.selectedProjectId == project.projectId,
+                                onClick = { viewModel.selectProject(project.projectId) },
+                                label = { Text(project.name) }
+                            )
+                        }
+                        item { Spacer(modifier = Modifier.width(16.dp)) }
+                    }
+                }
+            }
+
             // Category breakdown header
             item {
                 Text(
@@ -135,7 +162,8 @@ fun StatsScreen(
                             navController.navigate(
                                 StatsRoutes.categoryDetail(
                                     categoryExpense.categoryId,
-                                    uiState.currentMonth
+                                    uiState.currentMonth,
+                                    uiState.selectedProjectId
                                 )
                             )
                         }

@@ -5,6 +5,8 @@ import com.aibookkeeper.core.common.extensions.toEpochMillis
 import com.aibookkeeper.core.data.local.entity.TransactionEntity
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
+import com.aibookkeeper.core.data.model.decodeProjectIds
+import com.aibookkeeper.core.data.model.encodeProjectIds
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
@@ -30,31 +32,40 @@ class TransactionMapper @Inject constructor() {
         syncId = entity.syncId,
         serverVersion = entity.serverVersion,
         deletedAt = entity.deletedAt?.toLocalDateTime(),
+        projectIds = decodeProjectIds(entity.projectIdsState, entity.projectIdsBlob),
         recordedByUserId = entity.recordedByUserId,
         recordedByDisplayName = entity.recordedByDisplayName,
         recordedByEmail = entity.recordedByEmail
     )
 
-    fun toEntity(domain: Transaction): TransactionEntity = TransactionEntity(
-        id = domain.id,
-        amount = domain.amount,
-        type = domain.type.name,
-        categoryId = domain.categoryId,
-        merchantName = domain.merchantName,
-        note = domain.note,
-        originalInput = domain.originalInput,
-        date = domain.date.toEpochMillis(),
-        createdAt = domain.createdAt.toEpochMillis(),
-        updatedAt = domain.updatedAt.toEpochMillis(),
-        source = domain.source.name,
-        status = domain.status.name,
-        syncStatus = domain.syncStatus.name,
-        aiConfidence = domain.aiConfidence,
-        syncId = domain.syncId,
-        serverVersion = domain.serverVersion,
-        deletedAt = domain.deletedAt?.toEpochMillis(),
-        recordedByUserId = domain.recordedByUserId,
-        recordedByDisplayName = domain.recordedByDisplayName,
-        recordedByEmail = domain.recordedByEmail
-    )
+    fun toEntity(domain: Transaction): TransactionEntity {
+        val (projectIdsState, projectIdsBlob) = encodeProjectIds(domain.projectIds)
+        return TransactionEntity(
+            id = domain.id,
+            amount = domain.amount,
+            type = domain.type.name,
+            categoryId = domain.categoryId,
+            merchantName = domain.merchantName,
+            note = domain.note,
+            originalInput = domain.originalInput,
+            date = domain.date.toEpochMillis(),
+            createdAt = domain.createdAt.toEpochMillis(),
+            updatedAt = domain.updatedAt.toEpochMillis(),
+            source = domain.source.name,
+            status = domain.status.name,
+            syncStatus = domain.syncStatus.name,
+            aiConfidence = domain.aiConfidence,
+            syncId = domain.syncId,
+            serverVersion = domain.serverVersion,
+            deletedAt = domain.deletedAt?.toEpochMillis(),
+            projectIdsState = projectIdsState,
+            projectIdsBlob = projectIdsBlob,
+            projectIdsWriteState = projectIdsState,
+            projectIdsWriteBlob = projectIdsBlob,
+            projectIdsWriteUpdatedAt = if (domain.projectIds != null) domain.updatedAt.toEpochMillis() else 0,
+            recordedByUserId = domain.recordedByUserId,
+            recordedByDisplayName = domain.recordedByDisplayName,
+            recordedByEmail = domain.recordedByEmail
+        )
+    }
 }

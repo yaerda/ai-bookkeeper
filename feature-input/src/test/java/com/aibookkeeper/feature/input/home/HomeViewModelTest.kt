@@ -5,6 +5,7 @@ import android.content.Intent
 import app.cash.turbine.test
 import com.aibookkeeper.core.data.ai.AzureOpenAiPromptBuilder
 import com.aibookkeeper.core.data.model.Category
+import com.aibookkeeper.core.data.model.ProjectLedgerState
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
 import com.aibookkeeper.core.data.model.Transaction
@@ -17,6 +18,7 @@ import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
 import com.aibookkeeper.core.data.speech.SystemSpeechRecognitionAvailability
@@ -55,6 +57,7 @@ class HomeViewModelTest {
     private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
     private val ledgerContext: LedgerContext = mockk()
+    private val projectRepository: ProjectRepository = mockk()
 
     private val now = LocalDateTime.now()
     private val currentMonth = YearMonth.now()
@@ -67,6 +70,7 @@ class HomeViewModelTest {
         every { systemSpeechRecognitionManager.getAvailability() } returns SystemSpeechRecognitionAvailability()
         every { systemSpeechRecognitionManager.extractBestResult(any()) } returns null
         every { ledgerContext.state } returns MutableStateFlow(LedgerContextState())
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(ProjectLedgerState())
     }
 
     @AfterEach
@@ -93,7 +97,8 @@ class HomeViewModelTest {
             voiceTranscriptionRepository,
             secureConfigStore,
             systemSpeechRecognitionManager,
-            ledgerContext
+            ledgerContext,
+            projectRepository
         )
     }
 
@@ -130,6 +135,26 @@ class HomeViewModelTest {
         color = color,
         type = TransactionType.EXPENSE
     )
+
+    @Test
+    fun `home entry carries automatic opt-out and historical project intent to each saved row`() = runTest {
+        val saved = mutableListOf<Transaction>()
+        coEvery { transactionRepository.create(capture(saved)) } returns Result.success(1L)
+        coEvery { aiExtractionRepository.extract(any(), any()) } returns Result.success(
+            ExtractionResult(
+                amount = 20.0, type = "EXPENSE", category = "餐饮",
+                date = LocalDate.now().toString(), confidence = 0.9f
+            )
+        )
+        for (selection in listOf(null, emptyList(), listOf("historical-project"))) {
+            val vm = createViewModel(categories = listOf(createCategory()))
+            vm.submitAiInput("午饭20元\n晚饭20元", selection)
+            testDispatcher.scheduler.advanceUntilIdle()
+            assertEquals(selection, saved[saved.lastIndex].projectIds)
+            assertEquals(selection, saved[saved.lastIndex - 1].projectIds)
+        }
+        assertEquals(6, saved.size)
+    }
 
     // ── Initial state ────────────────────────────────────────────────────
 

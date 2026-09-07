@@ -4,11 +4,13 @@ import com.aibookkeeper.feature.sync.auth.AuthManager
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.CategoryRepository
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.feature.sync.ledger.ActiveLedgerCategoryRepository
 import com.aibookkeeper.feature.sync.ledger.ActiveLedgerTransactionRepository
 import com.aibookkeeper.feature.sync.ledger.SharedLedgerSession
 import com.aibookkeeper.feature.sync.queue.CloudSyncManager
+import com.aibookkeeper.feature.sync.projects.ActiveProjectRepository
 import com.aibookkeeper.feature.sync.queue.SyncManager
 import com.aibookkeeper.feature.sync.network.SyncApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -51,6 +53,12 @@ abstract class SyncModule {
     abstract fun bindCategoryRepository(
         impl: ActiveLedgerCategoryRepository
     ): CategoryRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindProjectRepository(
+        impl: ActiveProjectRepository
+    ): ProjectRepository
 
     companion object {
         @Provides

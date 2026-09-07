@@ -2,11 +2,13 @@ package com.aibookkeeper.feature.sync.ledger
 
 import com.aibookkeeper.core.data.di.LocalLedger
 import com.aibookkeeper.core.data.model.CategoryExpense
+import com.aibookkeeper.core.data.model.categoryKey
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.LedgerSelectionChangedException
 import com.aibookkeeper.core.data.repository.requireEditable
@@ -15,6 +17,7 @@ import java.time.YearMonth
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -24,19 +27,39 @@ import kotlinx.coroutines.flow.map
 @Singleton
 class ActiveLedgerTransactionRepository @Inject constructor(
     @LocalLedger private val localRepository: TransactionRepository,
+    private val projectRepository: ProjectRepository,
     private val session: SharedLedgerSession
 ) : TransactionRepository {
 
     override suspend fun create(transaction: Transaction): Result<Long> =
-        runCatching {
-            // Capture resolves Room category IDs independently of the selected online ledger.
-            if (transaction.source == TransactionSource.AUTO_CAPTURE) {
-                return@runCatching localRepository.create(transaction).getOrThrow()
-            }
+        resultOf {
             val state = session.state.value
+            if (transaction.source != TransactionSource.AUTO_CAPTURE) session.requireEditable(state.selection)
+            val destination = transaction.projectDestination
+                ?: projectRepository.captureDestination(transaction.source == TransactionSource.AUTO_CAPTURE)
+            projectRepository.requireCurrentDestination(destination)
+            if (transaction.source != TransactionSource.AUTO_CAPTURE) {
+                check(destination.canWrite) { "目标账本或登录账户已变化，请重试" }
+            }
+            if (transaction.source != TransactionSource.AUTO_CAPTURE &&
+                destination.selection != null && destination.selection != state.selection
+            ) throw LedgerSelectionChangedException()
+            val normalized = transaction.copy(
+                projectIds = projectRepository.resolveProjectIds(destination, transaction.projectIds)
+            )
+            projectRepository.requireCurrentDestination(destination)
+            // Capture resolves Room category IDs independently of the selected online ledger.
+            if (normalized.source == TransactionSource.AUTO_CAPTURE) {
+                return@resultOf localRepository.createValidated(normalized) {
+                    projectRepository.requireCurrentDestination(destination)
+                }.getOrThrow()
+            }
             session.requireEditable(state.selection)
-            if (state.selectedLedger.isLocal) localRepository.create(transaction).getOrThrow()
-            else session.push(transaction).id
+            if (state.selectedLedger.isLocal) localRepository.createValidated(normalized) {
+                projectRepository.requireCurrentDestination(destination)
+                session.requireEditable(state.selection)
+            }.getOrThrow()
+            else session.push(normalized, state.selection).id
         }
 
     override suspend fun getById(id: Long): Transaction? {
@@ -45,6 +68,32 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         else remoteSnapshot().firstOrNull { it.id == id }
         if (session.state.value.selection != state.selection) throw LedgerSelectionChangedException()
         return transaction
+    }
+
+    override suspend fun createAllValidated(
+        transactions: List<Transaction>,
+        beforePersist: () -> Unit
+    ): Result<List<Long>> = resultOf {
+        check(transactions.all { it.source == TransactionSource.AUTO_CAPTURE }) {
+            "整批写入仅适用于默认本地账本的图片记账"
+        }
+        if (transactions.isEmpty()) return@resultOf emptyList()
+        val destination = transactions.first().projectDestination
+            ?: projectRepository.captureDestination(defaultRoom = true)
+        check(destination.defaultRoom && transactions.all {
+            it.projectDestination == null || it.projectDestination == destination
+        }) { "批量账目的目标账本不一致" }
+        projectRepository.requireCurrentDestination(destination)
+        val normalized = transactions.map { transaction ->
+            transaction.copy(
+                projectIds = projectRepository.resolveProjectIds(destination, transaction.projectIds),
+                projectDestination = destination
+            )
+        }
+        localRepository.createAllValidated(normalized) {
+            projectRepository.requireCurrentDestination(destination)
+            beforePersist()
+        }.getOrThrow()
     }
 
     override fun observeById(id: Long): Flow<Transaction?> =
@@ -99,19 +148,32 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         remote = { transactions ->
             transactions.filter {
                 YearMonth.from(it.date) == yearMonth &&
-                    categoryKey(it) == categoryId
+                    it.categoryKey() == categoryId
             }
         }
     )
 
     override suspend fun update(transaction: Transaction): Result<Unit> =
-        runCatching {
+        resultOf {
             val state = session.state.value
             session.requireEditable(state.selection)
+            val destination = projectRepository.captureDestination()
+            check(destination.canWrite) { "目标账本或登录账户已变化，请重试" }
+            if (destination.selection != null && destination.selection != state.selection) {
+                throw LedgerSelectionChangedException()
+            }
+            if (transaction.projectIds != null) {
+                projectRepository.resolveProjectIds(destination, transaction.projectIds)
+            }
+            projectRepository.requireCurrentDestination(destination)
+            session.requireEditable(state.selection)
             if (state.selectedLedger.isLocal) {
-                localRepository.update(transaction).getOrThrow()
+                localRepository.updateValidated(transaction) {
+                    projectRepository.requireCurrentDestination(destination)
+                    session.requireEditable(state.selection)
+                }.getOrThrow()
             } else {
-                session.push(transaction.copy(updatedAt = LocalDateTime.now()))
+                session.push(transaction.copy(updatedAt = LocalDateTime.now()), state.selection)
                 Unit
             }
         }
@@ -121,10 +183,10 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         val transaction = getById(id) ?: return Result.failure(
             IllegalArgumentException("账单不存在")
         )
-        return update(transaction.copy(status = TransactionStatus.CONFIRMED))
+        return update(transaction.copy(status = TransactionStatus.CONFIRMED, projectIds = null))
     }
 
-    override suspend fun confirmAll(ids: List<Long>): Result<Unit> = runCatching {
+    override suspend fun confirmAll(ids: List<Long>): Result<Unit> = resultOf {
         ids.forEach { confirmTransaction(it).getOrThrow() }
     }
 
@@ -136,11 +198,12 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         val transaction = getById(id) ?: return Result.failure(
             IllegalArgumentException("账单不存在")
         )
-        return runCatching {
+        return resultOf {
             session.push(
                 transaction.copy(
                     deletedAt = LocalDateTime.now(),
-                    updatedAt = LocalDateTime.now()
+                    updatedAt = LocalDateTime.now(),
+                    projectIds = null
                 )
             )
             Unit
@@ -193,6 +256,7 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
         serverVersion: Long,
+        projectIds: List<String>?,
         recordedByUserId: String?,
         recordedByDisplayName: String?,
         recordedByEmail: String?
@@ -201,6 +265,7 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         expectedUpdatedAt,
         expectedServerVersion,
         serverVersion,
+        projectIds,
         recordedByUserId,
         recordedByDisplayName,
         recordedByEmail
@@ -218,6 +283,18 @@ class ActiveLedgerTransactionRepository @Inject constructor(
 
     override suspend fun mergeRemote(transaction: Transaction): Boolean =
         localRepository.mergeRemote(transaction)
+
+    override suspend fun needsRecordedByMetadataRefresh(): Boolean =
+        localRepository.needsRecordedByMetadataRefresh()
+
+    override suspend fun refreshRecordedByMetadata(transaction: Transaction): Boolean =
+        localRepository.refreshRecordedByMetadata(transaction)
+
+    override suspend fun needsProjectMetadataRefresh(): Boolean =
+        localRepository.needsProjectMetadataRefresh()
+
+    override suspend fun refreshProjectMetadata(transaction: Transaction): Boolean =
+        localRepository.refreshProjectMetadata(transaction)
 
     override suspend fun getMonthlyExpense(yearMonth: YearMonth): Double =
         if (isLocal()) {
@@ -268,7 +345,7 @@ class ActiveLedgerTransactionRepository @Inject constructor(
 
     private fun expenseBreakdown(transactions: List<Transaction>): List<CategoryExpense> {
         val grouped = transactions.groupBy {
-            categoryKey(it) to (it.categoryName ?: "其他")
+            it.categoryKey() to (it.categoryName ?: "其他")
         }
         val total = transactions.sumOf(Transaction::amount)
         return grouped.map { (category, items) ->
@@ -283,13 +360,13 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         }.sortedByDescending(CategoryExpense::amount)
     }
 
-    private fun categoryKey(transaction: Transaction): Long =
-        transaction.categoryId
-            ?: transaction.categoryName
-                ?.hashCode()
-                ?.toLong()
-                ?.let { if (it > 0) -it else it }
-            ?: 0L
+    private suspend fun <T> resultOf(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
 
     private fun <T> selectedFlow(
         local: () -> Flow<T>,

@@ -80,6 +80,14 @@ fun CategoryDetailScreen(
                     fontWeight = FontWeight.Bold
                 )
             }
+            if (uiState.projectId != null) {
+                Text(
+                    text = "仅显示所选项目内的分类账目",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             HorizontalDivider()
 
             when {

@@ -62,6 +62,40 @@ class TransactionRepositoryImplTest {
 
     // ── create ───────────────────────────────────────────────────────────
 
+    @Test
+    fun `batch delegates complete rows and validation to one atomic DAO operation`() = runTest {
+        val rows = listOf(sampleDomain.copy(id = 0), sampleDomain.copy(id = 0, syncId = "second"))
+        val entities = rows.map { TransactionMapper().toEntity(it) }
+        rows.zip(entities).forEach { (row, entity) -> every { mapper.toEntity(row) } returns entity }
+        val guard: () -> Unit = {}
+        coEvery { transactionDao.insertAllValidated(entities, guard) } returns listOf(1L, 2L)
+        assertEquals(listOf(1L, 2L), repository.createAllValidated(rows, guard).getOrThrow())
+        coVerify(exactly = 1) { transactionDao.insertAllValidated(entities, guard) }
+        coVerify(exactly = 0) { transactionDao.insert(any()) }
+    }
+
+    @Test
+    fun `pending sync serializes separate intent rather than cached display labels`() = runTest {
+        val cached = sampleEntity.copy(
+            categoryId = null, projectIdsState = "EXPLICIT", projectIdsBlob = "cached",
+            projectIdsWriteState = "UNSPECIFIED", projectIdsWriteBlob = null
+        )
+        val optedOut = cached.copy(
+            id = 2, projectIdsWriteState = "EXPLICIT", projectIdsWriteBlob = ""
+        )
+        val explicit = cached.copy(
+            id = 3, projectIdsWriteState = "EXPLICIT", projectIdsWriteBlob = "picked"
+        )
+        val mapper = TransactionMapper()
+        val repository = TransactionRepositoryImpl(transactionDao, categoryDao, mapper)
+        coEvery { transactionDao.getPendingSyncTransactions() } returns listOf(cached, optedOut, explicit)
+        val pending = repository.getPendingSync()
+        assertNull(pending[0].projectIds)
+        assertEquals(emptyList<String>(), pending[1].projectIds)
+        assertEquals(listOf("picked"), pending[2].projectIds)
+        assertEquals(listOf("cached"), mapper.toDomain(cached).projectIds)
+    }
+
     @Nested
     inner class Create {
 
@@ -559,6 +593,8 @@ class TransactionRepositoryImplTest {
                     any(),
                     0,
                     12,
+                    "UNSPECIFIED",
+                    null,
                     "user-1",
                     "Cloud Name",
                     "cloud@example.test"
@@ -570,6 +606,7 @@ class TransactionRepositoryImplTest {
                 sampleDomain.updatedAt,
                 0,
                 12,
+                null,
                 "user-1",
                 "Cloud Name",
                 "cloud@example.test"
@@ -582,6 +619,8 @@ class TransactionRepositoryImplTest {
                     any(),
                     0,
                     12,
+                    "UNSPECIFIED",
+                    null,
                     "user-1",
                     "Cloud Name",
                     "cloud@example.test"
@@ -610,6 +649,7 @@ class TransactionRepositoryImplTest {
                 categoryName = "餐饮",
                 serverVersion = 12,
                 syncStatus = SyncStatus.SYNCED,
+                projectIds = emptyList(),
                 recordedByUserId = "member-7",
                 recordedByDisplayName = "Member Name",
                 recordedByEmail = "member@example.test"
@@ -619,6 +659,8 @@ class TransactionRepositoryImplTest {
                 categoryId = 2,
                 serverVersion = 12,
                 syncStatus = "SYNCED",
+                projectIdsState = "EXPLICIT",
+                projectIdsBlob = "",
                 recordedByUserId = "member-7",
                 recordedByDisplayName = "Member Name",
                 recordedByEmail = "member@example.test"
@@ -667,6 +709,37 @@ class TransactionRepositoryImplTest {
                     "member-7",
                     "Member Name",
                     "member@example.test"
+                )
+            }
+        }
+
+        @Test
+        fun should_reportWhetherHistoricalProjectMetadataNeedsRefresh() = runTest {
+            coEvery { transactionDao.hasSyncedTransactionsMissingProjectMetadata() } returns true
+
+            assertTrue(repository.needsProjectMetadataRefresh())
+
+            coVerify { transactionDao.hasSyncedTransactionsMissingProjectMetadata() }
+        }
+
+        @Test
+        fun should_refreshProjectMetadata_onlyForMatchingSyncedRows() = runTest {
+            val remote = sampleDomain.copy(projectIds = listOf("project-a", "project-b"))
+            coEvery {
+                transactionDao.refreshProjectMetadata(
+                    remote.syncId,
+                    "EXPLICIT",
+                    "project-a\u001Fproject-b"
+                )
+            } returns 1
+
+            assertTrue(repository.refreshProjectMetadata(remote))
+
+            coVerify {
+                transactionDao.refreshProjectMetadata(
+                    remote.syncId,
+                    "EXPLICIT",
+                    "project-a\u001Fproject-b"
                 )
             }
         }

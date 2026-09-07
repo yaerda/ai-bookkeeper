@@ -49,10 +49,34 @@ class SyncPreferences @Inject constructor(
         preferences.edit().putBoolean("$KEY_RECORDED_BY_REFRESH_PREFIX$accountId", true).apply()
     }
 
+    fun isProjectMetadataRefreshComplete(accountId: String): Boolean =
+        preferences.getBoolean("$KEY_PROJECT_REFRESH_PREFIX$accountId", false)
+
+    fun markProjectMetadataRefreshComplete(accountId: String) {
+        preferences.edit().putBoolean("$KEY_PROJECT_REFRESH_PREFIX$accountId", true).apply()
+    }
+
+    fun projectCacheJson(accountId: String, ledgerId: String): String? =
+        preferences.getString("$KEY_PROJECT_CACHE_PREFIX$accountId:$ledgerId", null)
+
+    fun projectCacheRefreshedAt(accountId: String, ledgerId: String): Long? =
+        preferences.takeIf { it.contains("$KEY_PROJECT_CACHE_REFRESH_PREFIX$accountId:$ledgerId") }
+            ?.getLong("$KEY_PROJECT_CACHE_REFRESH_PREFIX$accountId:$ledgerId", 0L)
+
+    fun updateProjectCache(accountId: String, ledgerId: String, json: String, refreshedAt: Long) {
+        preferences.edit()
+            .putString("$KEY_PROJECT_CACHE_PREFIX$accountId:$ledgerId", json)
+            .putLong("$KEY_PROJECT_CACHE_REFRESH_PREFIX$accountId:$ledgerId", refreshedAt)
+            .apply()
+    }
+
     private companion object {
         const val KEY_ACCOUNT_ID = "bound_account_id"
         const val KEY_CURSOR = "pull_cursor"
         const val KEY_SELECTED_LEDGER_PREFIX = "selected_ledger_id:"
         const val KEY_RECORDED_BY_REFRESH_PREFIX = "recorded_by_refresh_complete:"
+        const val KEY_PROJECT_REFRESH_PREFIX = "project_metadata_refresh_complete:"
+        const val KEY_PROJECT_CACHE_PREFIX = "project_cache:"
+        const val KEY_PROJECT_CACHE_REFRESH_PREFIX = "project_cache_refreshed_at:"
     }
 }

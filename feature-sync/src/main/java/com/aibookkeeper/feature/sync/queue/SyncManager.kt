@@ -10,6 +10,8 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.feature.sync.auth.AccessToken
+import com.aibookkeeper.feature.sync.auth.AuthManager
+import com.aibookkeeper.feature.sync.auth.AuthState
 import com.aibookkeeper.feature.sync.auth.AuthenticationRequiredException
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.feature.sync.ledger.withCatalog
@@ -69,6 +71,7 @@ class CloudSyncManager @Inject constructor(
 
     private val mutex = Mutex()
     private val state = MutableStateFlow(SyncState.IDLE)
+    private var activeAccountId: String? = null
 
     override suspend fun syncNow(): Result<SyncReport> = mutex.withLock {
         state.value = SyncState.SYNCING
@@ -78,9 +81,12 @@ class CloudSyncManager @Inject constructor(
             if (!preferences.bindAccount(token.accountId)) {
                 throw AccountMismatchException()
             }
+            activeAccountId = token.accountId
+            ensureCurrent()
 
             val catalog = categorySync.syncDefault(token)
-            refreshRecordedByMetadataIfNeeded(token)
+            ensureCurrent()
+            refreshHistoricalMetadataIfNeeded(token)
 
             val firstUpload = uploadPending(
                 token.value,
@@ -104,7 +110,9 @@ class CloudSyncManager @Inject constructor(
             var pullConflicts = 0
             do {
                 val page = pull(token.value, cursor)
+                ensureCurrent()
                 page.transactions.forEach { remote ->
+                    ensureCurrent()
                     if (repository.mergeRemote(remote.toDomainTransaction())) {
                         downloaded++
                     } else {
@@ -115,6 +123,7 @@ class CloudSyncManager @Inject constructor(
                     throw IOException("同步游标没有前进")
                 }
                 cursor = page.nextCursor
+                ensureCurrent()
                 preferences.updateCursor(cursor)
             } while (page.hasMore)
 
@@ -153,6 +162,7 @@ class CloudSyncManager @Inject constructor(
         accessToken: String,
         pending: List<Transaction>
     ): UploadSummary {
+        ensureCurrent()
         return pending.chunked(MAX_PUSH_BATCH_SIZE).fold(UploadSummary()) { total, batch ->
             total + uploadBatchWithIsolation(accessToken, batch)
         }
@@ -166,14 +176,23 @@ class CloudSyncManager @Inject constructor(
         var uploaded = 0
         run {
             val response = pushBatch(accessToken, batch)
+            ensureCurrent()
             val pendingBySyncId = batch.associateBy { it.syncId }
+            val returnedIds = (response.accepted + response.conflicts).map { it.syncId }
+            check(returnedIds.distinct().size == returnedIds.size &&
+                returnedIds.all { it in pendingBySyncId }) { "同步响应的账单标识不匹配" }
             response.accepted.forEach { accepted ->
+                ensureCurrent()
                 val original = pendingBySyncId[accepted.syncId] ?: return@forEach
+                check(accepted.serverVersion > 0 && accepted.serverVersion >= original.serverVersion) {
+                    "同步确认版本无效或已过期"
+                }
                 if (repository.acknowledgeSynced(
                         syncId = accepted.syncId,
                         expectedUpdatedAt = original.updatedAt,
                         expectedServerVersion = original.serverVersion,
                         serverVersion = accepted.serverVersion,
+                        projectIds = accepted.projectIds,
                         recordedByUserId = accepted.recordedByUserId,
                         recordedByDisplayName = accepted.recordedByDisplayName,
                         recordedByEmail = accepted.recordedByEmail
@@ -185,6 +204,7 @@ class CloudSyncManager @Inject constructor(
                 }
             }
             response.conflicts.forEach { conflict ->
+                ensureCurrent()
                 val original = pendingBySyncId[conflict.syncId] ?: return@forEach
                 repository.rebasePendingSync(
                     syncId = conflict.syncId,
@@ -193,7 +213,7 @@ class CloudSyncManager @Inject constructor(
                 )
                 conflictIds += conflict.syncId
             }
-            UploadSummary(uploaded, conflictIds)
+            UploadSummary(uploaded, conflictIds, pendingBySyncId.keys - returnedIds.toSet())
         }
     } catch (error: PermanentSyncException) {
         if (batch.size == 1) {
@@ -209,10 +229,12 @@ class CloudSyncManager @Inject constructor(
         accessToken: String,
         pending: List<Transaction>
     ): PushResponse {
+        ensureCurrent()
         val response = api.push(
             authorization = "Bearer $accessToken",
             request = PushRequest(pending.map(Transaction::toSyncDto))
         )
+        ensureCurrent()
         response.body()?.let { return it }
         if (response.code() == 409) {
             val errorBody = response.errorBody()?.string()
@@ -226,26 +248,58 @@ class CloudSyncManager @Inject constructor(
         throw response.toSyncException("上传")
     }
 
-    private suspend fun refreshRecordedByMetadataIfNeeded(token: AccessToken) {
-        if (preferences.isRecordedByMetadataRefreshComplete(token.accountId)) {
-            return
-        }
-        if (!repository.needsRecordedByMetadataRefresh()) {
-            preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+    private suspend fun refreshHistoricalMetadataIfNeeded(token: AccessToken) {
+        ensureCurrent()
+        val needsRecordedByRefresh = !preferences.isRecordedByMetadataRefreshComplete(token.accountId) &&
+            repository.needsRecordedByMetadataRefresh()
+        val needsProjectRefresh = !preferences.isProjectMetadataRefreshComplete(token.accountId) &&
+            repository.needsProjectMetadataRefresh()
+        if (!needsRecordedByRefresh && !needsProjectRefresh) {
+            ensureCurrent()
+            if (!preferences.isRecordedByMetadataRefreshComplete(token.accountId)) {
+                preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+            }
+            if (!preferences.isProjectMetadataRefreshComplete(token.accountId)) {
+                preferences.markProjectMetadataRefreshComplete(token.accountId)
+            }
             return
         }
         var cursor = 0L
+        var projectMetadataAvailable = true
         do {
             val page = pull(token.value, cursor, RECORDED_BY_REFRESH_BATCH_SIZE)
+            ensureCurrent()
             page.transactions.forEach { remote ->
-                repository.refreshRecordedByMetadata(remote.toDomainTransaction())
+                ensureCurrent()
+                val transaction = remote.toDomainTransaction()
+                if (needsRecordedByRefresh) {
+                    repository.refreshRecordedByMetadata(transaction)
+                }
+                if (needsProjectRefresh) {
+                    ensureCurrent()
+                    if (remote.projectIds != null) {
+                        repository.refreshProjectMetadata(transaction)
+                    } else {
+                        projectMetadataAvailable = false
+                    }
+                }
             }
             if (page.hasMore && page.nextCursor <= cursor) {
                 throw IOException("同步游标没有前进")
             }
             cursor = page.nextCursor
         } while (page.hasMore)
-        preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+        ensureCurrent()
+        if (needsRecordedByRefresh) {
+            preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+        } else if (!preferences.isRecordedByMetadataRefreshComplete(token.accountId)) {
+            preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+        }
+        if (needsProjectRefresh && projectMetadataAvailable) {
+            preferences.markProjectMetadataRefreshComplete(token.accountId)
+        } else if (!needsProjectRefresh && !preferences.isProjectMetadataRefreshComplete(token.accountId)) {
+            preferences.markProjectMetadataRefreshComplete(token.accountId)
+        }
     }
 
     private suspend fun pull(
@@ -253,13 +307,24 @@ class CloudSyncManager @Inject constructor(
         cursor: Long,
         limit: Int = MAX_PULL_BATCH_SIZE
     ): PullResponse {
+        ensureCurrent()
         val response = api.pull("******", cursor, limit)
+        ensureCurrent()
         if (response.code() == 401 || response.code() == 403) {
             tokenProvider.invalidate()
             throw AuthenticationRequiredException()
         }
         return response.body()
             ?: throw response.toSyncException("下载")
+    }
+
+    private fun ensureCurrent() {
+        if (activeAccountId == null || preferences.boundAccountId.value != activeAccountId) {
+            throw AccountMismatchException()
+        }
+        if (tokenProvider is AuthManager &&
+            (tokenProvider.state.value as? AuthState.SignedIn)?.accountId != activeAccountId
+        ) throw AuthenticationRequiredException()
     }
 
     private data class UploadSummary(

@@ -28,7 +28,8 @@ data class LedgerContextState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val selectionVersion: Long = 0,
-    val localCategoriesSynced: Boolean = false
+    val localCategoriesSynced: Boolean = false,
+    val accountId: String? = null
 ) {
     val selectedLedger: LedgerOption
         get() = ledgers.firstOrNull { it.id == selectedLedgerId }

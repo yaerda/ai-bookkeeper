@@ -52,6 +52,7 @@ class TransactionMapperTest {
         status = status,
         syncStatus = syncStatus,
         aiConfidence = aiConfidence,
+        projectIds = listOf("project-1", "project-2"),
         recordedByUserId = "user-1",
         recordedByDisplayName = "Cloud Name",
         recordedByEmail = "cloud@example.test"
@@ -84,6 +85,8 @@ class TransactionMapperTest {
         status = status,
         syncStatus = syncStatus,
         aiConfidence = aiConfidence,
+        projectIdsState = "EXPLICIT",
+        projectIdsBlob = "project-1\u001Fproject-2",
         recordedByUserId = "user-1",
         recordedByDisplayName = "Cloud Name",
         recordedByEmail = "cloud@example.test"
@@ -110,6 +113,7 @@ class TransactionMapperTest {
             assertEquals(TransactionStatus.CONFIRMED, domain.status)
             assertEquals(SyncStatus.LOCAL, domain.syncStatus)
             assertEquals(0.95f, domain.aiConfidence)
+            assertEquals(listOf("project-1", "project-2"), domain.projectIds)
             assertEquals("user-1", domain.recordedByUserId)
             assertEquals("Cloud Name", domain.recordedByDisplayName)
             assertEquals("cloud@example.test", domain.recordedByEmail)
@@ -202,6 +206,8 @@ class TransactionMapperTest {
             assertEquals("CONFIRMED", entity.status)
             assertEquals("LOCAL", entity.syncStatus)
             assertEquals(0.95f, entity.aiConfidence)
+            assertEquals("EXPLICIT", entity.projectIdsState)
+            assertEquals("project-1\u001Fproject-2", entity.projectIdsBlob)
             assertEquals("user-1", entity.recordedByUserId)
             assertEquals("Cloud Name", entity.recordedByDisplayName)
             assertEquals("cloud@example.test", entity.recordedByEmail)

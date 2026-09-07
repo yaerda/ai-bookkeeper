@@ -15,6 +15,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -75,12 +78,17 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import dagger.hilt.android.EntryPointAccessors
 import com.aibookkeeper.core.data.ai.ExtractionCategoryProvider
 import com.aibookkeeper.core.data.ai.ExtractionStrategyManager
 import com.aibookkeeper.core.data.ai.NotificationExtractionPipeline
 import com.aibookkeeper.core.data.model.ExtractionResult
+import com.aibookkeeper.core.data.model.ProjectLedgerState
+import com.aibookkeeper.core.data.model.ProjectDefaultsAvailability
+import com.aibookkeeper.core.data.model.isActiveAt
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -129,6 +137,14 @@ internal fun CaptureScreen(
     val strategyManager = remember(entryPoint) { entryPoint.extractionStrategyManager() }
     val categoryProvider = remember(entryPoint) { entryPoint.extractionCategoryProvider() }
     val categoryDao = remember(entryPoint) { entryPoint.categoryDao() }
+    val projectRepository = remember(entryPoint) { entryPoint.projectRepository() }
+    val projectState by projectRepository.defaultLedgerState.collectAsStateWithLifecycle()
+    val projectDestination = remember(projectState.accountId, projectState.ledgerId, projectState.contextVersion) {
+        projectRepository.captureDestination(defaultRoom = true)
+    }
+    var selectedProjectIds by remember(projectDestination) {
+        mutableStateOf<List<String>?>(null)
+    }
 
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var ocrText by remember { mutableStateOf("") }
@@ -180,6 +196,7 @@ internal fun CaptureScreen(
     }
 
     fun clearAll() {
+        selectedProjectIds = null
         debounceJob?.cancel()
         debounceJob = null
         isProcessing = false
@@ -482,19 +499,31 @@ internal fun CaptureScreen(
         }
     }
 
-    val transactionSaver = remember(transactionRepository, categoryDao) {
-        TransactionSaver(transactionRepository, categoryDao)
+    val transactionSaver = remember(transactionRepository, categoryDao, projectRepository) {
+        TransactionSaver(transactionRepository, categoryDao, projectRepository)
     }
 
     fun confirmAndSave(data: ExtractionResult) {
         if (isProcessing) return
         isProcessing = true
         processingLabel = "正在保存..."
+        val savedProjectIds = selectedProjectIds?.toList()
+        val destination = projectDestination
+        val sourceText = ocrText
 
         coroutineScope.launch {
             val txId: Long = try {
-                withContext(Dispatchers.IO) { transactionSaver.saveOne(data, ocrText) }
-            } catch (_: Exception) { -1L }
+                withContext(Dispatchers.IO) {
+                    transactionSaver.saveOne(
+                        data, sourceText, projectIds = savedProjectIds, destination = destination
+                    )
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                errorMessage = error.message ?: "保存失败，请重试"
+                -1L
+            }
 
             isProcessing = false
             if (txId > 0) {
@@ -505,7 +534,7 @@ internal fun CaptureScreen(
                 ).show()
                 clearAll()
             } else {
-                errorMessage = "保存失败，请重试"
+                if (errorMessage.isBlank()) errorMessage = "保存失败，请重试"
             }
         }
     }
@@ -514,16 +543,25 @@ internal fun CaptureScreen(
         if (items.isEmpty() || isProcessing) return
         isProcessing = true
         processingLabel = "正在保存 ${items.size} 笔..."
+        val batchItems = items.toList()
+        val batchProjectIds = selectedProjectIds?.toList()
+        val batchDestination = projectDestination
+        val batchText = ocrText
+        val sharedDate = extractionResult?.date?.takeIf { it.isNotBlank() }
 
         coroutineScope.launch {
-            val sharedDate = extractionResult?.date?.takeIf { it.isNotBlank() }
             val (successCount, totalAmount) = try {
-                withContext(Dispatchers.IO) { transactionSaver.saveAll(items, ocrText, sharedDate) }
+                withContext(Dispatchers.IO) {
+                    transactionSaver.saveAll(batchItems, batchText, sharedDate, batchProjectIds, batchDestination)
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
             } catch (e: Exception) {
-                android.util.Log.e("CaptureScreen", "Batch save failed", e)
-                Pair(0, 0.0)
+                errorMessage = e.message ?: "保存失败，请重试"
+                return@launch
+            } finally {
+                isProcessing = false
             }
-            isProcessing = false
             if (successCount > 0) {
                 val message = if (successCount == items.size) {
                     "已保存 $successCount 笔，共 ¥${"%.2f".format(totalAmount)}"
@@ -533,7 +571,7 @@ internal fun CaptureScreen(
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                 clearAll()
             } else {
-                errorMessage = "保存失败，请重试"
+                if (errorMessage.isBlank()) errorMessage = "保存失败，请重试"
             }
         }
     }
@@ -767,6 +805,7 @@ internal fun CaptureScreen(
                                         checked = isSplitMode,
                                         onCheckedChange = { isSplitMode = it },
                                         modifier = Modifier
+                                            .testTag("capture-split-mode")
                                             .scale(0.6f)
                                             .height(20.dp)
                                     )
@@ -982,6 +1021,13 @@ internal fun CaptureScreen(
                             }
                         }
 
+                        CaptureProjectSelectionSection(
+                            state = projectState,
+                            selectedProjectIds = selectedProjectIds,
+                            onSelectedProjectIdsChange = { selectedProjectIds = it },
+                            enabled = !isProcessing
+                        )
+
                         if (savedMessage.isNotBlank()) {
                             Card(
                                 colors = CardDefaults.cardColors(
@@ -1170,7 +1216,81 @@ private fun Context.hasCameraPermission(): Boolean {
 interface CaptureScreenEntryPoint {
     fun notificationExtractionPipeline(): NotificationExtractionPipeline
     fun transactionRepository(): TransactionRepository
+    fun projectRepository(): ProjectRepository
     fun extractionStrategyManager(): ExtractionStrategyManager
     fun extractionCategoryProvider(): ExtractionCategoryProvider
     fun categoryDao(): com.aibookkeeper.core.data.local.dao.CategoryDao
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+internal fun CaptureProjectSelectionSection(
+    state: ProjectLedgerState,
+    selectedProjectIds: List<String>?,
+    onSelectedProjectIdsChange: (List<String>?) -> Unit,
+    enabled: Boolean = true
+) {
+    val effectiveIds = selectedProjectIds ?: state.defaultProjectIds.orEmpty()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("项目（保存到默认本地账本）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedProjectIds == null,
+                enabled = enabled,
+                onClick = { onSelectedProjectIdsChange(null) },
+                label = { Text("保存时按当前默认项目") }
+            )
+            FilterChip(
+                selected = selectedProjectIds != null && selectedProjectIds.isEmpty(),
+                enabled = enabled,
+                onClick = { onSelectedProjectIdsChange(emptyList()) },
+                label = { Text("不关联项目") }
+            )
+        }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            state.projects.forEach { project ->
+                FilterChip(
+                    selected = project.projectId in effectiveIds,
+                    enabled = enabled,
+                    onClick = {
+                        val next = if (project.projectId in effectiveIds) {
+                            effectiveIds - project.projectId
+                        } else {
+                            effectiveIds + project.projectId
+                        }
+                        onSelectedProjectIdsChange(next.distinct())
+                    },
+                    label = {
+                        Text(if (project.isActiveAt(java.time.Instant.now())) project.name else "${project.name}（未默认）")
+                    }
+                )
+            }
+        }
+        val helper = when {
+            state.errorMessage != null && state.projects.isNotEmpty() ->
+                "项目默认值正在使用缓存：${state.errorMessage}"
+            state.errorMessage != null -> state.errorMessage
+            state.availability == ProjectDefaultsAvailability.UNAVAILABLE ->
+                "项目信息当前不可用；仍可明确不关联项目，否则保存时由云端确定默认项目。"
+            else -> null
+        }
+        if (!helper.isNullOrBlank()) {
+            Text(
+                text = helper,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }

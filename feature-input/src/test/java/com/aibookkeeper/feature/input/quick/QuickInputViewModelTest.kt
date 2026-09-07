@@ -3,12 +3,15 @@ package com.aibookkeeper.feature.input.quick
 import app.cash.turbine.test
 import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
+import com.aibookkeeper.core.data.model.ProjectLedgerState
+import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -37,11 +40,13 @@ class QuickInputViewModelTest {
     private val categoryRepository: CategoryRepository = mockk()
     private val ledgerContext: LedgerContext = mockk()
     private val ledgerState = MutableStateFlow(LedgerContextState())
+    private val projectRepository: ProjectRepository = mockk()
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { ledgerContext.state } returns ledgerState
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(ProjectLedgerState())
     }
 
     @AfterEach
@@ -50,7 +55,7 @@ class QuickInputViewModelTest {
     }
 
     private fun createViewModel(): QuickInputViewModel {
-        return QuickInputViewModel(aiExtractionRepository, transactionRepository, categoryRepository, ledgerContext)
+        return QuickInputViewModel(aiExtractionRepository, transactionRepository, categoryRepository, ledgerContext, projectRepository)
     }
 
     private fun createExtractionResult(
@@ -67,6 +72,26 @@ class QuickInputViewModelTest {
         confidence = confidence,
         source = ExtractionSource.LOCAL_RULE
     )
+
+    @Test
+    fun `quick category and AI confirmation both forward explicit project opt-out`() = runTest {
+        val saved = mutableListOf<Transaction>()
+        coEvery { transactionRepository.create(capture(saved)) } returns Result.success(1L)
+        coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
+        coEvery { aiExtractionRepository.extract(any()) } returns Result.success(createExtractionResult())
+        val vm = createViewModel()
+        vm.setPreselectedCategory("餐饮", "🍚")
+        vm.submitCategoryAmount(20.0, "餐饮", emptyList())
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(emptyList<String>(), saved.single().projectIds)
+
+        vm.resetToIdle()
+        vm.submitText("午饭35元")
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.confirmSave(listOf("historical-project"))
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("historical-project"), saved.last().projectIds)
+    }
 
     // ── Initial state ────────────────────────────────────────────────────
 

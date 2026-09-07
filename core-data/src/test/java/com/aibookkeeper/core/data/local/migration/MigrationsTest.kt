@@ -44,4 +44,22 @@ class MigrationsTest {
         assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN RECORDEDBYDISPLAYNAME"))
         assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN RECORDEDBYEMAIL"))
     }
+
+    @Test
+    fun `migration 5 to 6 adds additive project columns only`() {
+        val statements = mutableListOf<String>()
+        val database = mockk<SupportSQLiteDatabase>()
+        every { database.execSQL(capture(statements)) } just runs
+
+        Migrations.MIGRATION_5_6.migrate(database)
+
+        val sql = statements.joinToString("\n").uppercase()
+        assertFalse(sql.contains("DROP TABLE"))
+        assertFalse(Regex("\\bDELETE\\b").containsMatchIn(sql))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN PROJECTIDSSTATE"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN PROJECTIDSBLOB"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN PROJECTIDSWRITESTATE"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN PROJECTIDSWRITEBLOB"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN PROJECTIDSWRITEUPDATEDAT"))
+    }
 }

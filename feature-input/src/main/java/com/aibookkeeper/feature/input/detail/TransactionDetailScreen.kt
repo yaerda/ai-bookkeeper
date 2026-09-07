@@ -69,12 +69,14 @@ import androidx.navigation.NavController
 import com.aibookkeeper.core.common.extensions.toFriendlyDateTimeString
 import com.aibookkeeper.core.common.extensions.toFriendlyFullDateTimeString
 import com.aibookkeeper.core.common.util.CategoryIconMapper
+import com.aibookkeeper.core.data.model.projectLabels
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.feature.input.common.AddCategoryDialog
 import com.aibookkeeper.feature.input.common.resolveCategoryIcon
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.feature.input.components.ProjectSelectionSection
 import com.aibookkeeper.feature.input.components.transactionRecordedBySummary
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,6 +88,7 @@ fun TransactionDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
+    val projectState by viewModel.projectState.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(errorMessage) {
@@ -167,14 +170,15 @@ fun TransactionDetailScreen(
                 TransactionDetailContent(
                     transaction = state.transaction,
                     categories = categories.filter { it.type == state.transaction.type },
+                    projectState = projectState,
                     showRecordedBy = ledgerState.isSignedIn &&
                         ledgerState.selectedLedger.mode == "FAMILY",
                     canEdit = ledgerState.canEdit,
                     onDelete = {
                         viewModel.deleteTransaction { navController.popBackStack() }
                     },
-                    onUpdate = { amount, catId, catName, note, date ->
-                        viewModel.updateTransaction(amount, catId, catName, note, date)
+                    onUpdate = { amount, catId, catName, note, date, projectIds ->
+                        viewModel.updateTransaction(amount, catId, catName, note, date, projectIds)
                     },
                     onAddCategory = viewModel::addCategory,
                     modifier = Modifier.padding(innerPadding)
@@ -189,9 +193,10 @@ fun TransactionDetailScreen(
 private fun TransactionDetailContent(
     transaction: Transaction,
     categories: List<com.aibookkeeper.core.data.model.Category>,
+    projectState: com.aibookkeeper.core.data.model.ProjectLedgerState,
     showRecordedBy: Boolean,
     onDelete: () -> Unit,
-    onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime) -> Unit,
+    onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime, List<String>?) -> Unit,
     onAddCategory: (String, String) -> Unit,
     canEdit: Boolean,
     modifier: Modifier = Modifier
@@ -207,6 +212,7 @@ private fun TransactionDetailContent(
     var editCategoryId by remember(transaction.id) { mutableStateOf(transaction.categoryId) }
     var editCategoryName by remember(transaction.id) { mutableStateOf(transaction.categoryName ?: "") }
     var editDate by remember(transaction.id) { mutableStateOf(transaction.date) }
+    var editProjectIds by remember(transaction.id, isEditing) { mutableStateOf<List<String>?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDeleteDialog && canEdit) {
@@ -421,6 +427,15 @@ private fun TransactionDetailContent(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(12.dp))
+                    ProjectSelectionSection(
+                        state = projectState,
+                        selectedProjectIds = editProjectIds,
+                        onSelectedProjectIdsChange = { editProjectIds = it },
+                        unspecifiedLabel = "保持现有项目",
+                        unspecifiedProjectIds = transaction.projectIds
+                    )
+
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -438,7 +453,14 @@ private fun TransactionDetailContent(
                         Button(
                             onClick = {
                                 val amount = editAmount.toDoubleOrNull() ?: transaction.amount
-                                onUpdate(amount, editCategoryId, editCategoryName, editNote.ifBlank { null }, editDate)
+                                onUpdate(
+                                    amount,
+                                    editCategoryId,
+                                    editCategoryName,
+                                    editNote.ifBlank { null },
+                                    editDate,
+                                    editProjectIds
+                                )
                                 isEditing = false
                             },
                             modifier = Modifier.weight(1f),
@@ -498,6 +520,15 @@ private fun TransactionDetailContent(
                     if (!transaction.originalInput.isNullOrBlank()) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         DetailRow(label = "原始输入", value = transaction.originalInput.orEmpty())
+                    }
+
+                    if (transaction.projectIds != null) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        val projectNames = projectLabels(transaction.projectIds, projectState.projects)
+                        DetailRow(
+                            label = "项目",
+                            value = if (projectNames.isEmpty()) "未关联项目" else projectNames.joinToString(" · ")
+                        )
                     }
 
                     if (showRecordedBy) {

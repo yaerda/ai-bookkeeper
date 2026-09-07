@@ -11,9 +11,12 @@ import com.aibookkeeper.core.data.model.CategoryExpense
 import com.aibookkeeper.core.data.model.SyncStatus
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionStatus
+import com.aibookkeeper.core.data.model.encodeProjectIds
+import com.aibookkeeper.core.data.model.decodeProjectIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDateTime
 import java.time.YearMonth
 import javax.inject.Inject
@@ -24,7 +27,7 @@ class TransactionRepositoryImpl @Inject constructor(
     private val mapper: TransactionMapper
 ) : TransactionRepository {
 
-    override suspend fun create(transaction: Transaction): Result<Long> = runCatching {
+    override suspend fun create(transaction: Transaction): Result<Long> = resultOf {
         transactionDao.insert(
             mapper.toEntity(
                 transaction.copy(
@@ -48,6 +51,40 @@ class TransactionRepositoryImpl @Inject constructor(
                 categoryColor = category?.color
             )
         }
+
+    override suspend fun createValidated(transaction: Transaction, beforePersist: () -> Unit): Result<Long> = resultOf {
+        transactionDao.insertValidated(
+            mapper.toEntity(transaction.copy(
+                syncStatus = if (transaction.syncStatus == SyncStatus.SYNCED) SyncStatus.PENDING_SYNC else transaction.syncStatus,
+                deletedAt = null
+            )),
+            beforePersist
+        )
+    }
+
+    override suspend fun updateValidated(transaction: Transaction, beforePersist: () -> Unit): Result<Unit> = resultOf {
+        transactionDao.updateValidated(
+            mapper.toEntity(transaction.copy(
+                syncStatus = if (transaction.syncStatus == SyncStatus.SYNCED) SyncStatus.PENDING_SYNC else transaction.syncStatus
+            )),
+            beforePersist
+        )
+    }
+
+    override suspend fun createAllValidated(
+        transactions: List<Transaction>,
+        beforePersist: () -> Unit
+    ): Result<List<Long>> = resultOf {
+        transactionDao.insertAllValidated(
+            transactions.map { transaction ->
+                mapper.toEntity(transaction.copy(
+                    syncStatus = if (transaction.syncStatus == SyncStatus.SYNCED) SyncStatus.PENDING_SYNC else transaction.syncStatus,
+                    deletedAt = null
+                ))
+            },
+            beforePersist
+        )
+    }
 
     override fun observeById(id: Long): Flow<Transaction?> =
         transactionDao.observeById(id).withCategoryChanges().map { entity ->
@@ -105,7 +142,7 @@ class TransactionRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun update(transaction: Transaction): Result<Unit> = runCatching {
+    override suspend fun update(transaction: Transaction): Result<Unit> = resultOf {
         transactionDao.updateMonotonic(
             mapper.toEntity(
                 transaction.copy(
@@ -119,17 +156,17 @@ class TransactionRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun confirmTransaction(id: Long): Result<Unit> = runCatching {
+    override suspend fun confirmTransaction(id: Long): Result<Unit> = resultOf {
         transactionDao.updateStatus(id, TransactionStatus.CONFIRMED.name, System.currentTimeMillis())
     }
 
-    override suspend fun confirmAll(ids: List<Long>): Result<Unit> = runCatching {
+    override suspend fun confirmAll(ids: List<Long>): Result<Unit> = resultOf {
         ids.forEach { id ->
             transactionDao.updateStatus(id, TransactionStatus.CONFIRMED.name, System.currentTimeMillis())
         }
     }
 
-    override suspend fun delete(id: Long): Result<Unit> = runCatching {
+    override suspend fun delete(id: Long): Result<Unit> = resultOf {
         transactionDao.softDeleteById(id, System.currentTimeMillis())
     }
 
@@ -164,7 +201,11 @@ class TransactionRepositoryImpl @Inject constructor(
         }
 
     override suspend fun getPendingSync(): List<Transaction> =
-        transactionDao.getPendingSyncTransactions().map { enrichWithCategory(mapper.toDomain(it)) }
+        transactionDao.getPendingSyncTransactions().map {
+            enrichWithCategory(mapper.toDomain(it).copy(
+                projectIds = decodeProjectIds(it.projectIdsWriteState, it.projectIdsWriteBlob)
+            ))
+        }
 
     override suspend fun markSynced(ids: List<Long>) {
         ids.forEach { transactionDao.updateSyncStatus(it, SyncStatus.SYNCED.name) }
@@ -175,18 +216,24 @@ class TransactionRepositoryImpl @Inject constructor(
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
         serverVersion: Long,
+        projectIds: List<String>?,
         recordedByUserId: String?,
         recordedByDisplayName: String?,
         recordedByEmail: String?
-    ): Boolean = transactionDao.acknowledgeSync(
-        syncId = syncId,
-        expectedUpdatedAt = expectedUpdatedAt.toEpochMillis(),
-        expectedServerVersion = expectedServerVersion,
-        serverVersion = serverVersion,
-        recordedByUserId = recordedByUserId,
-        recordedByDisplayName = recordedByDisplayName,
-        recordedByEmail = recordedByEmail
-    ) == 1
+    ): Boolean {
+        val (projectIdsState, projectIdsBlob) = encodeProjectIds(projectIds)
+        return transactionDao.acknowledgeSync(
+            syncId = syncId,
+            expectedUpdatedAt = expectedUpdatedAt.toEpochMillis(),
+            expectedServerVersion = expectedServerVersion,
+            serverVersion = serverVersion,
+            projectIdsState = projectIdsState,
+            projectIdsBlob = projectIdsBlob,
+            recordedByUserId = recordedByUserId,
+            recordedByDisplayName = recordedByDisplayName,
+            recordedByEmail = recordedByEmail
+        ) == 1
+    }
 
     override suspend fun rebasePendingSync(
         syncId: String,
@@ -227,6 +274,26 @@ class TransactionRepositoryImpl @Inject constructor(
             recordedByDisplayName = transaction.recordedByDisplayName,
             recordedByEmail = transaction.recordedByEmail
         ) == 1
+
+    override suspend fun needsProjectMetadataRefresh(): Boolean =
+        transactionDao.hasSyncedTransactionsMissingProjectMetadata()
+
+    override suspend fun refreshProjectMetadata(transaction: Transaction): Boolean {
+        val (projectIdsState, projectIdsBlob) = encodeProjectIds(transaction.projectIds)
+        return transactionDao.refreshProjectMetadata(
+            syncId = transaction.syncId,
+            projectIdsState = projectIdsState,
+            projectIdsBlob = projectIdsBlob
+        ) == 1
+    }
+
+    private suspend fun <T> resultOf(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
 
     override suspend fun getMonthlyExpense(yearMonth: YearMonth): Double =
         transactionDao.sumByTypeAndDateRange(

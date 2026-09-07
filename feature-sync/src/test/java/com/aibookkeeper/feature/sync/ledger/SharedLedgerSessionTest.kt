@@ -459,7 +459,13 @@ class SharedLedgerSessionTest {
 
         assertEquals(setOf(601L, 602L), session.remoteTransactions.value.map { it.categoryId }.toSet())
         assertEquals(setOf("🪴", "🐈"), session.remoteTransactions.value.map { it.categoryIcon }.toSet())
-        val repository = ActiveLedgerTransactionRepository(mockk<TransactionRepository>(), session)
+        val projectRepository = mockk<com.aibookkeeper.core.data.repository.ProjectRepository>()
+        every { projectRepository.resolveProjectIdsForNewTransaction() } returns null
+        val repository = ActiveLedgerTransactionRepository(
+            mockk<TransactionRepository>(),
+            projectRepository,
+            session
+        )
         val breakdown = repository.observeExpenseBreakdown(YearMonth.of(2026, 9)).first()
         assertEquals(setOf(601L, 602L), breakdown.map { it.categoryId }.toSet())
         assertEquals(1, repository.observeByCategoryAndMonth(601, YearMonth.of(2026, 9)).first().size)
@@ -489,7 +495,9 @@ class SharedLedgerSessionTest {
         val session = start()
         session.selectLedger("shared-a")
         runCurrent()
-        val authored = transaction(categoryA.name, categoryA.id).copy(
+        val original = transaction(categoryA.name, categoryA.id)
+        val authored = original.copy(
+            serverVersion = 1,
             recordedByUserId = "member-1",
             recordedByDisplayName = "Cloud Editor",
             recordedByEmail = "editor@example.com"
@@ -513,7 +521,7 @@ class SharedLedgerSessionTest {
             )
         )
 
-        val saved = session.push(transaction(categoryA.name, categoryA.id))
+        val saved = session.push(original)
         session.refresh()
 
         assertEquals("Cloud Editor", saved.recordedByDisplayName)
@@ -524,6 +532,18 @@ class SharedLedgerSessionTest {
         assertNull(legacy.recordedByDisplayName)
         assertNull(legacy.recordedByEmail)
         assertNull(legacy.recordedByUserId)
+    }
+
+    @Test
+    fun `idempotent accepted response may retain the current positive version`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+        val original = transaction(categoryA.name, categoryA.id).copy(serverVersion = 4)
+        coEvery { api.push(any(), any(), "shared-a") } returns Response.success(
+            PushResponse(listOf(original.toSyncDto()), emptyList())
+        )
+        assertEquals(4L, session.push(original).serverVersion)
     }
 
     private fun transaction(name: String, categoryId: Long) = Transaction(

@@ -34,6 +34,41 @@ class TransactionSyncIntegrationTest {
 
     private var database: AppDatabase? = null
 
+    @Test
+    fun captureBatchRollsBackEarlierRowsWhenTheDestinationChanges() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val first = entity(updatedAt = 100, serverVersion = 0)
+        val second = first.copy(syncId = UUID.randomUUID().toString(), amount = 25.0)
+        var validations = 0
+        val failed = runCatching {
+            dao.insertAllValidated(listOf(first, second)) {
+                validations++
+                check(validations < 2) { "Destination changed" }
+            }
+        }
+        assertTrue(failed.isFailure)
+        assertNull(dao.getBySyncId(first.syncId))
+        assertNull(dao.getBySyncId(second.syncId))
+        assertEquals(2, dao.insertAllValidated(listOf(first, second)) {}.size)
+        assertEquals(2, dao.getPendingSyncTransactions().size)
+    }
+
+    @Test
+    fun captureBatchAlsoRollsBackWhenItsFinalDestinationCheckFails() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val first = entity(updatedAt = 100, serverVersion = 0)
+        val second = first.copy(syncId = UUID.randomUUID().toString())
+        var validations = 0
+        val failed = runCatching {
+            dao.insertAllValidated(listOf(first, second)) {
+                validations++
+                check(validations < 3) { "Destination changed before commit" }
+            }
+        }
+        assertTrue(failed.isFailure)
+        assertTrue(dao.getPendingSyncTransactions().isEmpty())
+    }
+
     @After
     fun closeDatabase() {
         database?.close()
@@ -77,6 +112,133 @@ class TransactionSyncIntegrationTest {
     }
 
     @Test
+    fun migration5To6PreservesRowsAndDefaultsProjectSelectionToUnspecified() {
+        migrationHelper.createDatabase(TEST_DATABASE, 5).apply {
+            execSQL(
+                """
+                INSERT INTO transactions (
+                    id, amount, type, categoryId, merchantName, note, originalInput,
+                    date, createdAt, updatedAt, source, status, syncStatus,
+                    aiConfidence, aiRawResponse, syncId, serverVersion, deletedAt,
+                    recordedByUserId, recordedByDisplayName, recordedByEmail
+                ) VALUES (
+                    1, 12.5, 'EXPENSE', NULL, 'shop', 'note', NULL,
+                    100, 100, 100, 'MANUAL', 'CONFIRMED', 'SYNCED', NULL, NULL,
+                    '0ec11d58-589d-40c5-bc30-e4524b539a2c', 8, NULL,
+                    'writer-1', 'Cloud Writer', 'writer@example.test'
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val migrated = migrationHelper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            6,
+            true,
+            Migrations.MIGRATION_5_6
+        )
+        migrated.query(
+            "SELECT projectIdsState, projectIdsBlob, recordedByUserId, projectIdsWriteState, projectIdsWriteBlob, projectIdsWriteUpdatedAt FROM transactions WHERE id = 1"
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("UNSPECIFIED", cursor.getString(0))
+            assertTrue(cursor.isNull(1))
+            assertEquals("writer-1", cursor.getString(2))
+            assertEquals("UNSPECIFIED", cursor.getString(3))
+            assertTrue(cursor.isNull(4))
+            assertEquals(0, cursor.getLong(5))
+        }
+    }
+
+    @Test
+    fun destinationGuardRunsInsideRoomTransactionBeforeInsert() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val transaction = entity(updatedAt = 100, serverVersion = 0)
+        val failure = runCatching {
+            dao.insertValidated(transaction) { throw IllegalStateException("destination changed") }
+        }.exceptionOrNull()
+        assertTrue(failure is IllegalStateException)
+        assertNull(dao.getBySyncId(transaction.syncId))
+    }
+
+    @Test
+    fun untouchedLabelsRemainPreserveAcrossConflictRetryAndRemoteOptOut() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 100, serverVersion = 8).copy(
+            syncStatus = "SYNCED", projectIdsState = "EXPLICIT", projectIdsBlob = "old"
+        )
+        val id = dao.insert(original)
+        dao.updateMonotonic(original.copy(
+            id = id, note = "only note", updatedAt = 200, syncStatus = "PENDING_SYNC",
+            projectIdsState = "UNSPECIFIED", projectIdsBlob = null
+        ))
+        assertEquals("old", dao.getBySyncId(original.syncId)!!.projectIdsBlob)
+        assertEquals(1, dao.rebasePendingSync(original.syncId, 8, 9))
+        val pending = dao.getPendingSyncTransactions().single()
+        assertEquals("UNSPECIFIED", pending.projectIdsWriteState)
+        assertNull(pending.projectIdsWriteBlob)
+        dao.acknowledgeSync(original.syncId, 200, 9, 10, "EXPLICIT", "", null, null, null)
+        val stored = dao.getBySyncId(original.syncId)!!
+        assertEquals("", stored.projectIdsBlob)
+        assertEquals("UNSPECIFIED", stored.projectIdsWriteState)
+        assertEquals("only note", stored.note)
+    }
+
+    @Test
+    fun acknowledgedTagIntentClearsEvenWhenANewerNoteIsPending() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 100, serverVersion = 8).copy(
+            projectIdsState = "EXPLICIT", projectIdsBlob = "picked",
+            projectIdsWriteState = "EXPLICIT", projectIdsWriteBlob = "picked",
+            projectIdsWriteUpdatedAt = 100
+        )
+        val id = dao.insert(original)
+        dao.updateMonotonic(original.copy(
+            id = id, note = "later note", updatedAt = 200,
+            projectIdsState = "UNSPECIFIED", projectIdsBlob = null
+        ))
+        dao.acknowledgeSync(original.syncId, 100, 8, 9, "EXPLICIT", "picked", null, null, null)
+        val stored = dao.getBySyncId(original.syncId)!!
+        assertEquals("PENDING_SYNC", stored.syncStatus)
+        assertEquals("picked", stored.projectIdsBlob)
+        assertEquals("UNSPECIFIED", stored.projectIdsWriteState)
+        assertNull(stored.projectIdsWriteBlob)
+    }
+
+    @Test
+    fun newerExplicitOptOutAndListBothSurviveOlderAcknowledgement() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        for (explicit in listOf("", "picked")) {
+            val original = entity(updatedAt = 100, serverVersion = 8).copy(syncId = UUID.randomUUID().toString())
+            val id = dao.insert(original)
+            dao.updateMonotonic(original.copy(
+                id = id, updatedAt = 100, projectIdsState = "EXPLICIT", projectIdsBlob = explicit
+            ))
+            dao.acknowledgeSync(original.syncId, 100, 8, 9, "EXPLICIT", "older", null, null, null)
+            val stored = dao.getBySyncId(original.syncId)!!
+            assertEquals("PENDING_SYNC", stored.syncStatus)
+            assertEquals(explicit, stored.projectIdsBlob)
+            assertEquals("EXPLICIT", stored.projectIdsWriteState)
+            assertEquals(explicit, stored.projectIdsWriteBlob)
+            assertEquals(101, stored.projectIdsWriteUpdatedAt)
+            assertEquals(0, dao.refreshProjectMetadata(original.syncId, "EXPLICIT", "metadata"))
+        }
+    }
+
+    @Test
+    fun projectMetadataBackfillUpdatesDisplayWithoutCreatingWriteIntent() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 100, serverVersion = 8).copy(syncStatus = "SYNCED")
+        val id = dao.insert(original)
+        assertEquals(1, dao.refreshProjectMetadata(original.syncId, "EXPLICIT", "backfilled"))
+        dao.updateMonotonic(original.copy(id = id, note = "later note", updatedAt = 200, syncStatus = "PENDING_SYNC"))
+        val stored = dao.getBySyncId(original.syncId)!!
+        assertEquals("backfilled", stored.projectIdsBlob)
+        assertEquals("UNSPECIFIED", stored.projectIdsWriteState)
+    }
+
+    @Test
     fun acceptedOldSnapshotAdvancesBaselineWithoutClearingNewerEdit() = runBlocking {
         val dao = createDatabase().transactionDao()
         val original = entity(updatedAt = 100, serverVersion = 0)
@@ -88,6 +250,8 @@ class TransactionSyncIntegrationTest {
             expectedUpdatedAt = 100,
             expectedServerVersion = 0,
             serverVersion = 9,
+            projectIdsState = "UNSPECIFIED",
+            projectIdsBlob = null,
             recordedByUserId = "writer-1",
             recordedByDisplayName = "Cloud Writer",
             recordedByEmail = "writer@example.test"
@@ -115,6 +279,8 @@ class TransactionSyncIntegrationTest {
             expectedUpdatedAt = 100,
             expectedServerVersion = 0,
             serverVersion = 9,
+            projectIdsState = "UNSPECIFIED",
+            projectIdsBlob = null,
             recordedByUserId = "writer-1",
             recordedByDisplayName = "Cloud Writer",
             recordedByEmail = "writer@example.test"
@@ -149,6 +315,8 @@ class TransactionSyncIntegrationTest {
             expectedUpdatedAt = 100,
             expectedServerVersion = 0,
             serverVersion = 9,
+            projectIdsState = "UNSPECIFIED",
+            projectIdsBlob = null,
             recordedByUserId = "writer-2",
             recordedByDisplayName = "Cloud Editor",
             recordedByEmail = "editor@example.test"
@@ -162,6 +330,26 @@ class TransactionSyncIntegrationTest {
         assertEquals("writer-2", stored.recordedByUserId)
         assertEquals("Cloud Editor", stored.recordedByDisplayName)
         assertEquals("editor@example.test", stored.recordedByEmail)
+    }
+
+    @Test
+    fun localEditKeepsExplicitProjectSelectionWhenSyncMetadataRefreshesLater() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 100, serverVersion = 0)
+        val id = dao.insert(original.copy(projectIdsState = "EXPLICIT", projectIdsBlob = "project-a"))
+        val staleEdit = original.copy(
+            id = id,
+            note = "edited",
+            updatedAt = 200,
+            projectIdsState = "UNSPECIFIED",
+            projectIdsBlob = null
+        )
+
+        dao.updateMonotonic(staleEdit)
+
+        val stored = dao.getBySyncId(original.syncId)!!
+        assertEquals("EXPLICIT", stored.projectIdsState)
+        assertEquals("project-a", stored.projectIdsBlob)
     }
 
     @Test

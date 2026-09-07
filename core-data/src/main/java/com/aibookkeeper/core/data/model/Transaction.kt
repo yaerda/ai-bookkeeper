@@ -1,6 +1,7 @@
 package com.aibookkeeper.core.data.model
 
 import java.time.LocalDateTime
+import com.aibookkeeper.core.data.repository.ProjectWriteDestination
 
 data class Transaction(
     val id: Long = 0,
@@ -23,7 +24,10 @@ data class Transaction(
     val syncId: String = java.util.UUID.randomUUID().toString(),
     val serverVersion: Long = 0,
     val deletedAt: LocalDateTime? = null,
+    val projectIds: List<String>? = null,
     val recordedByUserId: String? = null,
     val recordedByDisplayName: String? = null,
-    val recordedByEmail: String? = null
+    val recordedByEmail: String? = null,
+    // Transient destination guard; never stored or sent to the server.
+    val projectDestination: ProjectWriteDestination? = null
 )

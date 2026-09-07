@@ -8,6 +8,7 @@ import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.LedgerOption
 import com.aibookkeeper.core.data.repository.LedgerSelectionChangedException
+import com.aibookkeeper.core.data.repository.LedgerSelection
 import com.aibookkeeper.core.data.repository.localLedgerOption
 import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.feature.sync.auth.AccessToken
@@ -106,6 +107,7 @@ class SharedLedgerSession internal constructor(
             clearRemote()
             _state.value = _state.value.copy(
                 isSignedIn = true,
+                accountId = signedIn.accountId,
                 isLoading = true,
                 errorMessage = null,
                 selectionVersion = generation
@@ -205,7 +207,8 @@ class SharedLedgerSession internal constructor(
         return saved.id
     }
 
-    suspend fun push(transaction: Transaction): Transaction {
+    suspend fun push(transaction: Transaction, expectedSelection: LedgerSelection = state.value.selection): Transaction {
+        requireEditable(expectedSelection)
         val request = writableRemoteRequest()
         val normalized = synchronized(lock) {
             if (transaction.id != 0L) {
@@ -220,6 +223,7 @@ class SharedLedgerSession internal constructor(
             resolved
         }
         val token = token(request)
+        requireEditable(expectedSelection)
         val response = api.push(
             authorization = "Bearer ${token.value}",
             request = PushRequest(listOf(normalized.toSyncDto())),
@@ -230,6 +234,10 @@ class SharedLedgerSession internal constructor(
             throw IOException("保存账单失败（HTTP ${response.code()}）")
         }
         val body = requireNotNull(response.body())
+        check(body.accepted.size <= 1 && body.accepted.all {
+            it.syncId == transaction.syncId && it.serverVersion > 0 &&
+                it.serverVersion >= transaction.serverVersion
+        }) { "服务器返回了其他账单或过期版本" }
         val accepted = body.accepted.firstOrNull()
             ?: throw IOException(
                 if (body.conflicts.isNotEmpty()) {

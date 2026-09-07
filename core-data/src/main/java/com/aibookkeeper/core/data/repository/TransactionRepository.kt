@@ -15,6 +15,14 @@ interface TransactionRepository {
 
     suspend fun create(transaction: Transaction): Result<Long>
 
+    suspend fun createValidated(transaction: Transaction, beforePersist: () -> Unit): Result<Long> {
+        beforePersist()
+        return create(transaction)
+    }
+
+    // A validation failure must roll back the complete local batch, not leave a partial write.
+    suspend fun createAllValidated(transactions: List<Transaction>, beforePersist: () -> Unit): Result<List<Long>>
+
     suspend fun getById(id: Long): Transaction?
 
     fun observeById(id: Long): Flow<Transaction?>
@@ -32,6 +40,11 @@ interface TransactionRepository {
     fun observeByCategoryAndMonth(categoryId: Long, yearMonth: YearMonth): Flow<List<Transaction>>
 
     suspend fun update(transaction: Transaction): Result<Unit>
+
+    suspend fun updateValidated(transaction: Transaction, beforePersist: () -> Unit): Result<Unit> {
+        beforePersist()
+        return update(transaction)
+    }
 
     suspend fun confirmTransaction(id: Long): Result<Unit>
 
@@ -56,6 +69,7 @@ interface TransactionRepository {
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
         serverVersion: Long,
+        projectIds: List<String>? = null,
         recordedByUserId: String? = null,
         recordedByDisplayName: String? = null,
         recordedByEmail: String? = null
@@ -72,6 +86,10 @@ interface TransactionRepository {
     suspend fun needsRecordedByMetadataRefresh(): Boolean = false
 
     suspend fun refreshRecordedByMetadata(transaction: Transaction): Boolean = false
+
+    suspend fun needsProjectMetadataRefresh(): Boolean = false
+
+    suspend fun refreshProjectMetadata(transaction: Transaction): Boolean = false
 
     suspend fun getMonthlyExpense(yearMonth: YearMonth): Double
 

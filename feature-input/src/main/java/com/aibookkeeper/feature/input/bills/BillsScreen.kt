@@ -29,6 +29,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.aibookkeeper.core.common.util.CategoryIconMapper
+import com.aibookkeeper.core.data.model.projectSummary
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
@@ -158,6 +160,15 @@ fun BillsScreen(
 
             HorizontalDivider()
 
+            if (uiState.availableProjects.isNotEmpty() || uiState.selectedProjectId != null) {
+                ProjectFilterRow(
+                    selectedProjectId = uiState.selectedProjectId,
+                    projects = uiState.availableProjects,
+                    onSelectProject = viewModel::selectProject
+                )
+                HorizontalDivider()
+            }
+
             if (uiState.isLoading) {
                 // Loading state
                 Box(
@@ -196,6 +207,7 @@ fun BillsScreen(
                             SwipeToDeleteTransactionItem(
                                 transaction = transaction,
                                 showRecordedBy = uiState.showFamilyTransactionAuthors,
+                                projects = uiState.availableProjects,
                                 onDelete = { tx ->
                                     viewModel.deleteTransaction(tx.id)
                                     scope.launch {
@@ -336,11 +348,40 @@ private fun DayHeader(dayGroup: DayGroup) {
     }
 }
 
+@Composable
+private fun ProjectFilterRow(
+    selectedProjectId: String?,
+    projects: List<com.aibookkeeper.core.data.model.ProjectBinding>,
+    onSelectProject: (String?) -> Unit
+) {
+    androidx.compose.foundation.lazy.LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        item {
+            FilterChip(
+                selected = selectedProjectId == null,
+                onClick = { onSelectProject(null) },
+                label = { Text("全部项目") }
+            )
+        }
+        items(projects, key = { it.projectId }) { project ->
+            FilterChip(
+                selected = selectedProjectId == project.projectId,
+                onClick = { onSelectProject(project.projectId) },
+                label = { Text(project.name) }
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToDeleteTransactionItem(
     transaction: Transaction,
     showRecordedBy: Boolean,
+    projects: List<com.aibookkeeper.core.data.model.ProjectBinding>,
     onDelete: (Transaction) -> Unit,
     onClick: () -> Unit
 ) {
@@ -378,6 +419,7 @@ private fun SwipeToDeleteTransactionItem(
         TransactionItem(
             transaction = transaction,
             showRecordedBy = showRecordedBy,
+            projects = projects,
             onClick = onClick
         )
     }
@@ -387,6 +429,7 @@ private fun SwipeToDeleteTransactionItem(
 private fun TransactionItem(
     transaction: Transaction,
     showRecordedBy: Boolean,
+    projects: List<com.aibookkeeper.core.data.model.ProjectBinding> = emptyList(),
     onClick: () -> Unit
 ) {
     Column(
@@ -425,6 +468,7 @@ private fun TransactionItem(
             } catch (_: Exception) { "" }
             val subtitle = joinTransactionMeta(
                 transactionRecordedBySummary(transaction, showFamily = showRecordedBy),
+                projectSummary(transaction.projectIds, projects),
                 transaction.note,
                 timeText
             )

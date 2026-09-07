@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -55,6 +57,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aibookkeeper.core.data.model.ProjectLedgerState
+import com.aibookkeeper.feature.input.components.ProjectSelectionSection
 
 /**
  * Quick input bottom-sheet Compose UI.
@@ -70,6 +74,9 @@ fun QuickInputSheet(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val projectState by viewModel.projectState.collectAsStateWithLifecycle()
+    val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
+    var projectIds by remember(ledgerState.selection) { mutableStateOf<List<String>?>(null) }
     val context = LocalContext.current
 
     LaunchedEffect(uiState) {
@@ -79,18 +86,22 @@ fun QuickInputSheet(
             "记账成功 ¥${"%.2f".format(success.amount)} ${success.category}",
             Toast.LENGTH_SHORT
         ).show()
+        projectIds = null
         viewModel.resetAfterSave()
     }
 
     QuickInputSheetContent(
         uiState = uiState,
         onSubmitText = viewModel::submitText,
-        onSubmitCategoryAmount = viewModel::submitCategoryAmount,
-        onConfirm = viewModel::confirmSave,
+        onSubmitCategoryAmount = { amount, category -> viewModel.submitCategoryAmount(amount, category, projectIds) },
+        onConfirm = { viewModel.confirmSave(projectIds) },
         onRetry = viewModel::resetToIdle,
         onDismiss = onDismiss,
         onOpenFullEditor = onOpenFullEditor,
-        modifier = modifier
+        modifier = modifier,
+        projectState = projectState,
+        projectIds = projectIds,
+        onProjectIdsChange = { projectIds = it }
     )
 }
 
@@ -103,7 +114,10 @@ fun QuickInputSheetContent(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
     onOpenFullEditor: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    projectState: ProjectLedgerState = ProjectLedgerState(),
+    projectIds: List<String>? = null,
+    onProjectIdsChange: (List<String>?) -> Unit = {}
 ) {
     // Dim background with tap-to-dismiss
     Box(
@@ -130,7 +144,7 @@ fun QuickInputSheetContent(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
                 // Drag handle
                 Box(
                     modifier = Modifier
@@ -141,6 +155,16 @@ fun QuickInputSheetContent(
                         .align(Alignment.CenterHorizontally)
                 )
                 Spacer(modifier = Modifier.height(16.dp))
+
+                if (uiState is QuickInputUiState.Idle || uiState is QuickInputUiState.Preview) {
+                    ProjectSelectionSection(
+                        state = projectState,
+                        selectedProjectIds = projectIds,
+                        onSelectedProjectIdsChange = onProjectIdsChange,
+                        unspecifiedLabel = "保存时按当前默认项目"
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 when (uiState) {
                     is QuickInputUiState.Idle -> {

@@ -10,7 +10,9 @@ import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionRepository
-import java.time.LocalDate
+import com.aibookkeeper.core.data.repository.ProjectRepository
+import com.aibookkeeper.core.data.repository.ProjectWriteDestination
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDateTime
 
 /**
@@ -19,7 +21,8 @@ import java.time.LocalDateTime
  */
 class TransactionSaver(
     private val transactionRepository: TransactionRepository,
-    private val categoryDao: CategoryDao
+    private val categoryDao: CategoryDao,
+    private val projectRepository: ProjectRepository? = null
 ) {
     /**
      * Save a single ExtractionResult as a Transaction.
@@ -32,61 +35,83 @@ class TransactionSaver(
     suspend fun saveOne(
         data: ExtractionResult,
         originalInput: String = "",
-        overrideDate: String? = null
+        overrideDate: String? = null,
+        projectIds: List<String>? = null,
+        destination: ProjectWriteDestination? = null
     ): Long {
+        val target = destination ?: projectRepository?.captureDestination(defaultRoom = true)
+        target?.let { projectRepository?.requireCurrentDestination(it) }
+        val transaction = prepareTransaction(data, originalInput, overrideDate, projectIds, target) ?: return -1L
+        target?.let { projectRepository?.requireCurrentDestination(it) }
+        return transactionRepository.create(transaction).getOrElse {
+            if (it is CancellationException) throw it
+            -1L
+        }
+    }
+
+    private suspend fun prepareTransaction(
+        data: ExtractionResult,
+        originalInput: String,
+        overrideDate: String?,
+        projectIds: List<String>?,
+        target: ProjectWriteDestination?
+    ): Transaction? {
+        val amount = Math.abs(data.amount ?: 0.0)
+        require(amount.isFinite()) { "金额无效，请核对后保存" }
+        if (amount == 0.0) return null
         val type = try {
             TransactionType.valueOf(data.type)
-        } catch (_: Exception) {
+        } catch (_: IllegalArgumentException) {
             TransactionType.EXPENSE
         }
         val categoryId = categoryDao.findByNameAndType(data.category, type.name)?.id
             ?: categoryDao.findByNameAndType("其他", type.name)?.id
         val now = LocalDateTime.now()
         val parsedDate = resolveTransactionDate(overrideDate ?: data.date, now)
-        val amount = Math.abs(data.amount ?: 0.0)
-
-        if (amount == 0.0) return -1L
-
-        return transactionRepository.create(
-            Transaction(
-                amount = amount,
-                type = type,
-                categoryId = categoryId,
-                merchantName = data.merchantName,
-                note = data.note,
-                originalInput = originalInput.ifBlank { "AI Vision: image" },
-                date = parsedDate,
-                createdAt = now,
-                updatedAt = now,
-                source = TransactionSource.AUTO_CAPTURE,
-                status = if (data.confidence >= 0.7f)
-                    TransactionStatus.CONFIRMED
-                else
-                    TransactionStatus.PENDING,
-                syncStatus = SyncStatus.LOCAL,
-                aiConfidence = data.confidence
-            )
-        ).getOrElse { -1L }
+        return Transaction(
+            amount = amount,
+            type = type,
+            categoryId = categoryId,
+            merchantName = data.merchantName,
+            note = data.note,
+            originalInput = originalInput.ifBlank { "AI Vision: image" },
+            date = parsedDate,
+            createdAt = now,
+            updatedAt = now,
+            source = TransactionSource.AUTO_CAPTURE,
+            status = if (data.confidence >= 0.7f) TransactionStatus.CONFIRMED else TransactionStatus.PENDING,
+            syncStatus = SyncStatus.LOCAL,
+            aiConfidence = data.confidence,
+            projectIds = projectIds?.toList(),
+            projectDestination = target
+        )
     }
 
     /**
      * Save multiple ExtractionResults (split mode).
-     * Returns pair of (successCount, totalAmount).
+     * Valid rows commit together, or none do. Returns (successCount, totalAmount).
      */
     suspend fun saveAll(
         items: List<ExtractionResult>,
         originalInput: String = "",
-        overrideDate: String? = null
+        overrideDate: String? = null,
+        projectIds: List<String>? = null,
+        destination: ProjectWriteDestination? = null
     ): Pair<Int, Double> {
-        var successCount = 0
-        var totalAmount = 0.0
+        if (items.isEmpty()) return 0 to 0.0
+        val target = destination ?: projectRepository?.captureDestination(defaultRoom = true)
+        val selectedProjectIds = projectIds?.toList()
+        val transactions = mutableListOf<Transaction>()
         for (item in items) {
-            val txId = saveOne(item, originalInput, overrideDate)
-            if (txId > 0) {
-                successCount++
-                totalAmount += Math.abs(item.amount ?: 0.0)
+            target?.let { projectRepository?.requireCurrentDestination(it) }
+            prepareTransaction(item, originalInput, overrideDate, selectedProjectIds, target)?.let {
+                transactions += it
             }
         }
-        return Pair(successCount, totalAmount)
+        if (transactions.isEmpty()) return 0 to 0.0
+        val savedIds = transactionRepository.createAllValidated(transactions) {
+            target?.let { projectRepository?.requireCurrentDestination(it) }
+        }.getOrThrow()
+        return savedIds.size to transactions.sumOf { it.amount }
     }
 }

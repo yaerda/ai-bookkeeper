@@ -6,10 +6,16 @@ import com.aibookkeeper.core.data.model.ExtractionResult
 import com.aibookkeeper.core.data.model.ExtractionSource
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.repository.TransactionRepository
+import com.aibookkeeper.core.data.repository.ProjectRepository
+import com.aibookkeeper.core.data.repository.ProjectWriteDestination
+import com.aibookkeeper.core.data.repository.LedgerSelectionChangedException
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.every
+import io.mockk.verify
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -22,6 +28,7 @@ class TransactionSaverTest {
     private lateinit var transactionRepository: TransactionRepository
     private lateinit var categoryDao: CategoryDao
     private lateinit var saver: TransactionSaver
+    private val batchTransactions = mutableListOf<Transaction>()
 
     private val foodCategory = CategoryEntity(
         id = 1, name = "餐饮", icon = "ic_food", color = "#FF5722",
@@ -45,6 +52,13 @@ class TransactionSaverTest {
         transactionRepository = mockk()
         categoryDao = mockk()
         saver = TransactionSaver(transactionRepository, categoryDao)
+        batchTransactions.clear()
+        coEvery { transactionRepository.createAllValidated(any(), any()) } answers {
+            secondArg<() -> Unit>().invoke()
+            val transactions = firstArg<List<Transaction>>()
+            batchTransactions.addAll(transactions)
+            Result.success(transactions.indices.map { it + 1L })
+        }
 
         // Default: category found
         coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } returns foodCategory
@@ -177,12 +191,67 @@ class TransactionSaverTest {
         }
 
         @Test
+        fun `should forward explicit project ids when capture user selects them`() = runTest {
+            val txSlot = slot<Transaction>()
+            coEvery { transactionRepository.create(capture(txSlot)) } returns Result.success(8L)
+
+            saver.saveOne(makeItem(), projectIds = listOf("project-a", "project-b"))
+
+            assertEquals(listOf("project-a", "project-b"), txSlot.captured.projectIds)
+        }
+
+        @Test
         fun `should return -1 when repository create fails`() = runTest {
             coEvery { transactionRepository.create(any()) } returns Result.failure(RuntimeException("DB error"))
 
             val result = saver.saveOne(makeItem())
 
             assertEquals(-1L, result)
+        }
+
+        @Test
+        fun `destination remains default Room with local category IDs and explicit opt out`() = runTest {
+            val projects = mockk<ProjectRepository>()
+            val target = ProjectWriteDestination("original", "default", defaultRoom = true)
+            every { projects.captureDestination(true) } returns target
+            every { projects.requireCurrentDestination(target) } returns Unit
+            val saved = slot<Transaction>()
+            coEvery { transactionRepository.create(capture(saved)) } returns Result.success(1)
+            TransactionSaver(transactionRepository, categoryDao, projects).saveOne(
+                makeItem(), projectIds = emptyList()
+            )
+            assertEquals(target, saved.captured.projectDestination)
+            assertEquals(foodCategory.id, saved.captured.categoryId)
+            assertEquals(emptyList<String>(), saved.captured.projectIds)
+            assertEquals(com.aibookkeeper.core.data.model.TransactionSource.AUTO_CAPTURE, saved.captured.source)
+            verify(exactly = 1) { projects.captureDestination(true) }
+        }
+
+        @Test
+        fun `account change during category lookup cannot persist prior explicit picks`() = runTest {
+            val projects = mockk<ProjectRepository>()
+            val target = ProjectWriteDestination("original", "default", defaultRoom = true)
+            var changed = false
+            every { projects.captureDestination(true) } returns target
+            every { projects.requireCurrentDestination(target) } answers {
+                if (changed) throw LedgerSelectionChangedException()
+            }
+            coEvery { categoryDao.findByNameAndType("餐饮", "EXPENSE") } answers {
+                changed = true
+                foodCategory
+            }
+            val failure = runCatching {
+                TransactionSaver(transactionRepository, categoryDao, projects)
+                    .saveOne(makeItem(), projectIds = listOf("picked"))
+            }.exceptionOrNull()
+            assertTrue(failure is LedgerSelectionChangedException)
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
+
+        @Test
+        fun `cancellation is not reported as failed save`() = runTest {
+            coEvery { transactionRepository.create(any()) } returns Result.failure(CancellationException())
+            assertTrue(runCatching { saver.saveOne(makeItem()) }.exceptionOrNull() is CancellationException)
         }
     }
 
@@ -191,10 +260,7 @@ class TransactionSaverTest {
 
         @Test
         fun `repository receives only retained edited rows with categories and shared date`() = runTest {
-            val saved = mutableListOf<Transaction>()
-            coEvery { transactionRepository.create(capture(saved)) } answers {
-                Result.success(saved.size.toLong())
-            }
+            val saved = batchTransactions
             val originalLines = listOf("删除项 -¥100.00", "午餐 -¥26.00", "工资 +¥50.00")
             val originalItems = listOf(
                 makeItem(amount = 100.0, note = "删除项"),
@@ -215,7 +281,8 @@ class TransactionSaverTest {
             assertEquals(listOf("EXPENSE", "INCOME"), saved.map { it.type.name })
             assertTrue(saved.all { it.date.toLocalDate().toString() == "2026-09-06" })
             assertTrue(saved.all { it.originalInput == text })
-            coVerify(exactly = 2) { transactionRepository.create(any()) }
+            coVerify(exactly = 1) { transactionRepository.createAllValidated(any(), any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
         }
 
         @Test
@@ -226,6 +293,7 @@ class TransactionSaverTest {
 
             assertEquals(0 to 0.0, saver.saveAll(edited.items))
             coVerify(exactly = 0) { transactionRepository.create(any()) }
+            coVerify(exactly = 0) { transactionRepository.createAllValidated(any(), any()) }
         }
     }
 
@@ -234,9 +302,6 @@ class TransactionSaverTest {
 
         @Test
         fun `should save all items in split mode`() = runTest {
-            var nextId = 100L
-            coEvery { transactionRepository.create(any()) } answers { Result.success(nextId++) }
-
             val items = listOf(
                 makeItem(amount = 26.0, note = "马桶"),
                 makeItem(amount = 6.9, note = "饮料"),
@@ -247,19 +312,12 @@ class TransactionSaverTest {
 
             assertEquals(3, count)
             assertEquals(48.7, total, 0.01)
-            coVerify(exactly = 3) { transactionRepository.create(any()) }
+            coVerify(exactly = 1) { transactionRepository.createAllValidated(any(), any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
         }
 
         @Test
         fun `should handle mixed EXPENSE and INCOME items`() = runTest {
-            val txSlots = mutableListOf<Transaction>()
-            var nextId = 200L
-            coEvery { transactionRepository.create(capture(slot<Transaction>().also { txSlots })) } answers {
-                Result.success(nextId++)
-            }
-            // Re-mock to capture all
-            coEvery { transactionRepository.create(any()) } answers { Result.success(nextId++) }
-
             val items = listOf(
                 makeItem(amount = 100.0, type = "EXPENSE", note = "消费"),
                 makeItem(amount = 50.0, type = "INCOME", category = "工资", note = "退款")
@@ -273,11 +331,8 @@ class TransactionSaverTest {
 
         @Test
         fun `should save negative expenses and positive incomes in split mode`() = runTest {
-            val savedTransactions = mutableListOf<Transaction>()
+            val savedTransactions = batchTransactions
             coEvery { categoryDao.findByNameAndType("工资", "INCOME") } returns salaryCategory
-            coEvery { transactionRepository.create(capture(savedTransactions)) } answers {
-                Result.success(savedTransactions.size.toLong())
-            }
 
             val items = listOf(
                 makeItem(amount = -26.0, type = "EXPENSE", note = "午餐"),
@@ -296,10 +351,7 @@ class TransactionSaverTest {
 
         @Test
         fun `should use shared visible date for split items`() = runTest {
-            val savedTransactions = mutableListOf<Transaction>()
-            coEvery { transactionRepository.create(capture(savedTransactions)) } answers {
-                Result.success(savedTransactions.size.toLong())
-            }
+            val savedTransactions = batchTransactions
 
             val items = listOf(
                 makeItem(amount = 26.0, type = "EXPENSE", date = "2026-02-19", note = "商品A"),
@@ -323,9 +375,6 @@ class TransactionSaverTest {
 
         @Test
         fun `should skip zero-amount items but save others`() = runTest {
-            var nextId = 300L
-            coEvery { transactionRepository.create(any()) } answers { Result.success(nextId++) }
-
             val items = listOf(
                 makeItem(amount = 26.0, note = "商品A"),
                 makeItem(amount = 0.0, note = "免费品"),
@@ -336,14 +385,12 @@ class TransactionSaverTest {
 
             assertEquals(2, count) // skipped the 0-amount item
             assertEquals(41.0, total, 0.01)
-            coVerify(exactly = 2) { transactionRepository.create(any()) }
+            assertEquals(2, batchTransactions.size)
+            coVerify(exactly = 1) { transactionRepository.createAllValidated(any(), any()) }
         }
 
         @Test
         fun `should handle negative amounts in split items`() = runTest {
-            var nextId = 400L
-            coEvery { transactionRepository.create(any()) } answers { Result.success(nextId++) }
-
             val items = listOf(
                 makeItem(amount = -26.0, type = "EXPENSE"),
                 makeItem(amount = -6.9, type = "EXPENSE")
@@ -356,17 +403,36 @@ class TransactionSaverTest {
         }
 
         @Test
-        fun `should return zero count when all items fail`() = runTest {
-            coEvery { transactionRepository.create(any()) } returns Result.failure(RuntimeException("DB error"))
+        fun `batch failure is surfaced without a success-shaped zero count`() = runTest {
+            coEvery { transactionRepository.createAllValidated(any(), any()) } returns
+                Result.failure(IllegalStateException("DB error"))
 
             val items = listOf(
                 makeItem(amount = 26.0),
                 makeItem(amount = 6.9)
             )
 
-            val (count, _) = saver.saveAll(items)
+            val error = runCatching { saver.saveAll(items) }.exceptionOrNull()
+            assertEquals("DB error", error?.message)
+            assertTrue(batchTransactions.isEmpty())
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
+        }
 
-            assertEquals(0, count)
+        @Test
+        fun `destination invalidation aborts the single atomic batch call`() = runTest {
+            val projects = mockk<ProjectRepository>()
+            val target = ProjectWriteDestination("account", "default", defaultRoom = true)
+            every { projects.captureDestination(true) } returns target
+            every { projects.requireCurrentDestination(target) } returns Unit
+            coEvery { transactionRepository.createAllValidated(any(), any()) } returns
+                Result.failure(LedgerSelectionChangedException())
+            val error = runCatching {
+                TransactionSaver(transactionRepository, categoryDao, projects)
+                    .saveAll(listOf(makeItem(), makeItem(amount = 15.0)), projectIds = emptyList())
+            }.exceptionOrNull()
+            assertTrue(error is LedgerSelectionChangedException)
+            coVerify(exactly = 1) { transactionRepository.createAllValidated(any(), any()) }
+            coVerify(exactly = 0) { transactionRepository.create(any()) }
         }
 
         @Test

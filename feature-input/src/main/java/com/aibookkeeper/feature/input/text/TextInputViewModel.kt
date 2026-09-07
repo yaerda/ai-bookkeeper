@@ -19,6 +19,7 @@ import com.aibookkeeper.core.data.repository.AiExtractionRepository
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerSelection
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.requireEditable
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
@@ -68,7 +69,8 @@ class TextInputViewModel @Inject constructor(
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository,
     private val secureConfigStore: SecureConfigStore,
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager,
-    private val ledgerContext: LedgerContext
+    private val ledgerContext: LedgerContext,
+    projectRepository: ProjectRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<TextInputUiState>(TextInputUiState.Idle)
@@ -76,6 +78,7 @@ class TextInputViewModel @Inject constructor(
     val uiState: StateFlow<TextInputUiState> = _uiState.asStateFlow()
     val voiceStatus: StateFlow<VoiceStatus> = _voiceStatus.asStateFlow()
     val ledgerState = ledgerContext.state
+    val projectState = projectRepository.currentLedgerState
 
     val categories = categoryRepository.observeAllCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -118,7 +121,7 @@ class TextInputViewModel @Inject constructor(
         }
     }
 
-    fun confirmSave() {
+    fun confirmSave(projectIds: List<String>? = null) {
         val preview = _uiState.value as? TextInputUiState.Preview ?: return
         val extraction = lastExtractionResult ?: return
         val selection = extractionSelection ?: return
@@ -154,7 +157,8 @@ class TextInputViewModel @Inject constructor(
                         TransactionStatus.PENDING
                     },
                     syncStatus = SyncStatus.LOCAL,
-                    aiConfidence = extraction.confidence
+                    aiConfidence = extraction.confidence,
+                    projectIds = projectIds
                 )
                 ledgerContext.requireEditable(selection)
                 transactionRepository.create(transaction).getOrThrow()
@@ -178,7 +182,8 @@ class TextInputViewModel @Inject constructor(
         categoryName: String,
         note: String?,
         type: TransactionType,
-        selection: LedgerSelection = ledgerState.value.selection
+        selection: LedgerSelection = ledgerState.value.selection,
+        projectIds: List<String>? = null
     ) {
         if (_uiState.value !is TextInputUiState.Idle) return
         _uiState.value = TextInputUiState.Saving
@@ -210,7 +215,8 @@ class TextInputViewModel @Inject constructor(
                     updatedAt = now,
                     source = TransactionSource.MANUAL,
                     status = TransactionStatus.CONFIRMED,
-                    syncStatus = SyncStatus.LOCAL
+                    syncStatus = SyncStatus.LOCAL,
+                    projectIds = projectIds
                 )
                 ledgerContext.requireEditable(selection)
                 transactionRepository.create(transaction).getOrThrow()

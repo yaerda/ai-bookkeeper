@@ -6,8 +6,11 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.SyncStatus
+import com.aibookkeeper.core.data.model.ProjectBinding
+import com.aibookkeeper.core.data.model.ProjectLedgerState
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import io.mockk.coEvery
@@ -37,6 +40,7 @@ class BillsViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
     private val ledgerContext: LedgerContext = mockk()
+    private val projectRepository: ProjectRepository = mockk()
 
     private val now = LocalDateTime.now()
 
@@ -44,6 +48,9 @@ class BillsViewModelTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { ledgerContext.state } returns MutableStateFlow(LedgerContextState())
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            com.aibookkeeper.core.data.model.ProjectLedgerState()
+        )
     }
 
     @AfterEach
@@ -71,16 +78,54 @@ class BillsViewModelTest {
     )
 
     private fun createViewModel(
-        transactions: List<Transaction> = emptyList(),
         expense: Double = 0.0,
-        income: Double = 0.0
+        income: Double = 0.0,
+        transactions: List<Transaction> = emptyList(),
     ): BillsViewModel {
-        every { transactionRepository.observeByMonth(any()) } returns flowOf(transactions)
-        every { transactionRepository.observeMonthlyExpense(any()) } returns flowOf(expense)
-        every { transactionRepository.observeMonthlyIncome(any()) } returns flowOf(income)
+        val data = if (transactions.isNotEmpty()) {
+            transactions
+        } else {
+            buildList {
+                if (expense > 0) add(createTransaction(amount = expense, type = TransactionType.EXPENSE))
+                if (income > 0) add(createTransaction(id = 2, amount = income, type = TransactionType.INCOME))
+            }
+        }
+        every { transactionRepository.observeByMonth(any()) } returns flowOf(data)
         every { transactionRepository.observeTransactionMonths() } returns flowOf(emptyList())
 
-        return BillsViewModel(transactionRepository, ledgerContext)
+        return BillsViewModel(
+            transactionRepository,
+            ledgerContext,
+            projectRepository
+        )
+    }
+
+    @Test
+    fun `ledger change clears a retained project filter without waiting for project refresh`() = runTest {
+        val context = MutableStateFlow(LedgerContextState())
+        every { ledgerContext.state } returns context
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            ProjectLedgerState(
+                ledgerId = context.value.selectedLedgerId,
+                projects = listOf(ProjectBinding("p1", context.value.selectedLedgerId, "旅行", true, null, null, "Asia/Shanghai", 1, true, true))
+            )
+        )
+        val vm = createViewModel(transactions = listOf(
+            createTransaction(1, 10.0).copy(projectIds = listOf("p1")),
+            createTransaction(2, 20.0)
+        ))
+        vm.uiState.test {
+            awaitItem()
+            awaitItem()
+            vm.selectProject("p1")
+            assertEquals(10.0, awaitItem().monthExpense)
+            context.value = context.value.copy(selectedLedgerId = "other", selectionVersion = 1)
+            val changed = awaitItem()
+            assertNull(changed.selectedProjectId)
+            assertTrue(changed.availableProjects.isEmpty())
+            assertEquals(30.0, changed.monthExpense)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ── Initial state ────────────────────────────────────────────────────
@@ -235,6 +280,33 @@ class BillsViewModelTest {
                 awaitItem()
                 val loaded = awaitItem()
                 assertTrue(loaded.dayGroups[0].date > loaded.dayGroups[1].date)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_filterTransactionsBySelectedProject_withoutChangingBaseOrder() = runTest {
+            val today = LocalDate.now()
+            every { projectRepository.currentLedgerState } returns MutableStateFlow(
+                ProjectLedgerState(
+                    ledgerId = ledgerContext.state.value.selectedLedgerId,
+                    projects = listOf(
+                        ProjectBinding("p1", "ledger", "装修", true, null, null, "Asia/Shanghai", 1, true, true)
+                    )
+                )
+            )
+            val tx1 = createTransaction(id = 1, amount = 35.0, date = today.atTime(12, 0)).copy(projectIds = listOf("p1"))
+            val tx2 = createTransaction(id = 2, amount = 20.0, date = today.atTime(8, 0)).copy(projectIds = listOf("p1", "p2"))
+            val tx3 = createTransaction(id = 3, amount = 50.0, date = today.atTime(19, 0)).copy(projectIds = listOf("p2"))
+            val vm = createViewModel(transactions = listOf(tx1, tx2, tx3))
+
+            vm.uiState.test {
+                awaitItem()
+                awaitItem()
+                vm.selectProject("p1")
+                val filtered = awaitItem()
+                assertEquals(55.0, filtered.monthExpense)
+                assertEquals(listOf(1L, 2L), filtered.dayGroups.single().transactions.map { it.id })
                 cancelAndIgnoreRemainingEvents()
             }
         }

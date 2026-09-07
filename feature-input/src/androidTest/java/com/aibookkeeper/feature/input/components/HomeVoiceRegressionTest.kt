@@ -13,6 +13,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.navigation.compose.rememberNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -24,6 +28,7 @@ import androidx.compose.ui.semantics.getOrNull
 import com.aibookkeeper.feature.input.home.HomeScreen
 import com.aibookkeeper.feature.input.home.HomeUiState
 import com.aibookkeeper.feature.input.home.HomeViewModel
+import com.aibookkeeper.core.data.model.ProjectLedgerState
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -60,6 +65,7 @@ class HomeVoiceRegressionTest {
     private fun launchHome(engineFactory: (Context) -> SpeechInputEngine = factory): HomeViewModel {
         val viewModel = mockk<HomeViewModel>(relaxed = true)
         every { viewModel.uiState } returns MutableStateFlow(HomeUiState(isLoading = false))
+        every { viewModel.projectState } returns MutableStateFlow(ProjectLedgerState())
         compose.setContent {
             CompositionLocalProvider(LocalSpeechInputEngineFactory provides engineFactory) {
                 MaterialTheme { HomeScreen(rememberNavController(), viewModel = viewModel) }
@@ -73,6 +79,22 @@ class HomeVoiceRegressionTest {
         compose.mainClock.advanceTimeBy(800)
         compose.waitUntil(5_000) { engines.firstOrNull()?.listener != null }
         return engines.last()
+    }
+
+    @Test
+    fun homeProjectOptOutReachesTheSaveAction() {
+        val viewModel = launchHome()
+        compose.onNodeWithContentDescription("AI 记账").performTouchInput {
+            down(center)
+            up()
+        }
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("午饭20元")
+        compose.onNodeWithText("不关联项目").performScrollTo().performClick()
+        compose.onNodeWithTag("home-voice-submit").performScrollTo().performTouchInput {
+            down(center)
+            up()
+        }
+        compose.runOnIdle { verify(exactly = 1) { viewModel.submitAiInput("午饭20元", emptyList()) } }
     }
 
     @Test

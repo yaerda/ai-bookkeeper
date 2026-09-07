@@ -14,6 +14,7 @@ import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.LedgerOption
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.VoiceTranscriptionRepository
 import com.aibookkeeper.core.data.security.SecureConfigStore
@@ -51,6 +52,7 @@ class TextInputViewModelTest {
     private val categoryRepository: CategoryRepository = mockk()
     private val ledgerContext: LedgerContext = mockk()
     private val ledgerState = MutableStateFlow(LedgerContextState())
+    private val projectRepository: ProjectRepository = mockk()
     private val voiceTranscriptionRepository: VoiceTranscriptionRepository = mockk(relaxed = true)
     private val secureConfigStore: SecureConfigStore = mockk(relaxed = true)
     private val systemSpeechRecognitionManager: SystemSpeechRecognitionManager = mockk(relaxed = true)
@@ -60,6 +62,9 @@ class TextInputViewModelTest {
         Dispatchers.setMain(testDispatcher)
         every { categoryRepository.observeAllCategories() } returns flowOf(emptyList())
         every { ledgerContext.state } returns ledgerState
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            com.aibookkeeper.core.data.model.ProjectLedgerState()
+        )
         coEvery { categoryRepository.findByNameAndType(any(), any()) } returns null
         coEvery { categoryRepository.getById(any()) } answers {
             Category(firstArg(), "餐饮", "ic_food", "#FF5722", TransactionType.EXPENSE)
@@ -83,7 +88,8 @@ class TextInputViewModelTest {
             voiceTranscriptionRepository,
             secureConfigStore,
             systemSpeechRecognitionManager,
-            ledgerContext
+            ledgerContext,
+            projectRepository
         )
     }
 
@@ -202,6 +208,25 @@ class TextInputViewModelTest {
                     it.categoryId == 900L && it.categoryName == "家庭菜园" &&
                         it.categoryIcon == "🪴" && it.categoryColor == "#123ABC"
                 })
+            }
+        }
+
+        @Test
+        fun `manual save forwards explicit project opt-out and selections`() = runTest {
+            val vm = createViewModel()
+            coEvery { transactionRepository.create(any()) } returns Result.success(1L)
+
+            vm.saveManual(50.0, 1L, "餐饮", "午饭", TransactionType.EXPENSE, projectIds = emptyList())
+            testDispatcher.scheduler.advanceUntilIdle()
+            coVerify {
+                transactionRepository.create(match { it.projectIds == emptyList<String>() })
+            }
+
+            vm.resetToIdle()
+            vm.saveManual(50.0, 1L, "餐饮", "午饭", TransactionType.EXPENSE, projectIds = listOf("project-a"))
+            testDispatcher.scheduler.advanceUntilIdle()
+            coVerify {
+                transactionRepository.create(match { it.projectIds == listOf("project-a") })
             }
         }
     }

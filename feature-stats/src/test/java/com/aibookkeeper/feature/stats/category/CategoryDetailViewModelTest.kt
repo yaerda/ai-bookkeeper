@@ -87,4 +87,26 @@ class CategoryDetailViewModelTest {
             syncStatus = SyncStatus.SYNCED
         )
     }
+
+    @Test
+    fun `project category drilldown excludes other project transactions`() = runTest {
+        val month = YearMonth.of(2026, 8)
+        every { repository.observeByCategoryAndMonth(3L, month) } returns flowOf(listOf(
+            transaction(1, 10.0).copy(projectIds = listOf("p1", "p2")),
+            transaction(2, 20.0).copy(projectIds = listOf("p2")),
+            transaction(3, 30.0).copy(projectIds = emptyList())
+        ))
+        val vm = CategoryDetailViewModel(
+            SavedStateHandle(mapOf("categoryId" to 3L, "yearMonth" to month.toString(), "projectId" to "p1")),
+            repository
+        )
+        vm.uiState.test {
+            awaitItem()
+            val loaded = awaitItem()
+            assertEquals("p1", loaded.projectId)
+            assertEquals(listOf(1L), loaded.transactions.map { it.id })
+            assertEquals(10.0, loaded.total)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 }

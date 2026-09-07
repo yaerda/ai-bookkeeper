@@ -17,7 +17,8 @@ fun NavGraphBuilder.statsNavGraph(
     navController: NavController,
     onNotificationServiceToggle: (Boolean) -> Unit = {},
     onCloudSyncClick: () -> Unit = {},
-    onFamilyLedgerClick: () -> Unit = {}
+    onFamilyLedgerClick: () -> Unit = {},
+    onProjectsClick: () -> Unit = {}
 ) {
     composable(StatsRoutes.OVERVIEW) {
         StatsScreen(navController = navController)
@@ -27,7 +28,8 @@ fun NavGraphBuilder.statsNavGraph(
             navController = navController,
             onNotificationServiceToggle = onNotificationServiceToggle,
             onCloudSyncClick = onCloudSyncClick,
-            onFamilyLedgerClick = onFamilyLedgerClick
+            onFamilyLedgerClick = onFamilyLedgerClick,
+            onProjectsClick = onProjectsClick
         )
     }
     composable(StatsRoutes.LOCAL_SPEECH_DIAGNOSTIC) {
@@ -46,7 +48,12 @@ fun NavGraphBuilder.statsNavGraph(
         route = StatsRoutes.CATEGORY_DETAIL,
         arguments = listOf(
             navArgument("categoryId") { type = NavType.LongType },
-            navArgument("yearMonth") { type = NavType.StringType }
+            navArgument("yearMonth") { type = NavType.StringType },
+            navArgument("projectId") {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            }
         )
     ) {
         CategoryDetailScreen(navController = navController)

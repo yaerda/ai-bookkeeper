@@ -18,7 +18,8 @@ data class CategoryDetailUiState(
     val yearMonth: YearMonth = YearMonth.now(),
     val transactions: List<Transaction> = emptyList(),
     val total: Double = 0.0,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val projectId: String? = null
 )
 
 @HiltViewModel
@@ -31,17 +32,22 @@ class CategoryDetailViewModel @Inject constructor(
     private val yearMonth = YearMonth.parse(
         checkNotNull(savedStateHandle.get<String>("yearMonth"))
     )
+    private val projectId = savedStateHandle.get<String>("projectId")
 
     val uiState: StateFlow<CategoryDetailUiState> =
         transactionRepository.observeByCategoryAndMonth(categoryId, yearMonth)
             .map { transactions ->
+                val selectedTransactions = transactions.filter {
+                    projectId == null || projectId in it.projectIds.orEmpty()
+                }
                 CategoryDetailUiState(
                     categoryName = transactions.firstOrNull()?.categoryName
                         ?: if (categoryId == 0L) "其他" else "分类明细",
                     yearMonth = yearMonth,
-                    transactions = transactions,
-                    total = transactions.sumOf { it.amount },
-                    isLoading = false
+                    transactions = selectedTransactions,
+                    total = selectedTransactions.sumOf { it.amount },
+                    isLoading = false,
+                    projectId = projectId
                 )
             }
             .stateIn(

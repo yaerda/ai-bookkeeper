@@ -11,6 +11,7 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.CategoryRepository
 import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.LedgerContextState
+import com.aibookkeeper.core.data.repository.ProjectRepository
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -39,6 +40,7 @@ class TransactionDetailViewModelTest {
     private val transactionRepository: TransactionRepository = mockk()
     private val categoryRepository: CategoryRepository = mockk()
     private val ledgerContext: LedgerContext = mockk()
+    private val projectRepository: ProjectRepository = mockk()
     private val ledgerState = MutableStateFlow(LedgerContextState())
     private val now = LocalDateTime.now()
 
@@ -46,6 +48,12 @@ class TransactionDetailViewModelTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { ledgerContext.state } returns ledgerState
+        every { projectRepository.currentLedgerState } returns MutableStateFlow(
+            com.aibookkeeper.core.data.model.ProjectLedgerState()
+        )
+        coEvery { categoryRepository.getById(any()) } answers {
+            Category(firstArg(), "餐饮", "ic_food", "#FF5722", TransactionType.EXPENSE)
+        }
     }
 
     @AfterEach
@@ -62,7 +70,8 @@ class TransactionDetailViewModelTest {
         note: String? = "午饭",
         merchantName: String? = null,
         aiConfidence: Float? = null,
-        originalInput: String? = null
+        originalInput: String? = null,
+        projectIds: List<String>? = null
     ) = Transaction(
         id = id,
         amount = amount,
@@ -80,7 +89,8 @@ class TransactionDetailViewModelTest {
         source = source,
         status = status,
         syncStatus = SyncStatus.LOCAL,
-        aiConfidence = aiConfidence
+        aiConfidence = aiConfidence,
+        projectIds = projectIds
     )
 
     private fun createSavedStateHandle(transactionId: Long = 1L): SavedStateHandle {
@@ -97,7 +107,8 @@ class TransactionDetailViewModelTest {
             createSavedStateHandle(transactionId),
             transactionRepository,
             categoryRepository,
-            ledgerContext
+            ledgerContext,
+            projectRepository
         )
     }
 
@@ -253,7 +264,8 @@ class TransactionDetailViewModelTest {
                 createSavedStateHandle(1L),
                 transactionRepository,
                 categoryRepository,
-                ledgerContext
+                ledgerContext,
+                projectRepository
             )
 
             vm.uiState.test {
@@ -281,7 +293,8 @@ class TransactionDetailViewModelTest {
                 createSavedStateHandle(1L),
                 transactionRepository,
                 categoryRepository,
-                ledgerContext
+                ledgerContext,
+                projectRepository
             )
 
             vm.uiState.test {
@@ -353,7 +366,8 @@ class TransactionDetailViewModelTest {
                 SavedStateHandle(emptyMap<String, Any>()),
                 transactionRepository,
                 categoryRepository,
-                ledgerContext
+                ledgerContext,
+                projectRepository
             )
 
             vm.uiState.test {
@@ -399,6 +413,24 @@ class TransactionDetailViewModelTest {
                 assertNull(loaded.transaction.merchantName)
                 assertNull(loaded.transaction.aiConfidence)
                 assertNull(loaded.transaction.originalInput)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        @Test
+        fun should_sendPreserveIntent_when_updateDoesNotChangeProjects() = runTest {
+            val tx = createTransaction(projectIds = listOf("project-a"))
+            coEvery { transactionRepository.update(any()) } returns Result.success(Unit)
+            val vm = createViewModel(transaction = tx)
+
+            vm.uiState.test {
+                awaitItem()
+                awaitItem()
+                vm.updateTransaction(35.0, 1, "餐饮", "午饭", now)
+                testDispatcher.scheduler.advanceUntilIdle()
+                coVerify {
+                    transactionRepository.update(match { it.projectIds == null })
+                }
                 cancelAndIgnoreRemainingEvents()
             }
         }
