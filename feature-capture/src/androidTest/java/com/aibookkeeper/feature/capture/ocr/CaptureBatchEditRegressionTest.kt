@@ -15,11 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -152,8 +154,15 @@ class CaptureBatchEditRegressionTest {
         coVerify(exactly = 1) { strategy.extractFromImageDetailed(any(), "image/jpeg", any()) }
     }
 
+    private fun openEditor() {
+        compose.onNodeWithText("编辑").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasTestTag("capture-text-editor")).fetchSemanticsNodes().size == 1
+        }
+    }
+
     private fun editText(value: String) {
-        compose.onNodeWithText("编辑").performClick()
+        openEditor()
         compose.onNodeWithTag("capture-text-editor").performTextReplacement(value)
     }
 
@@ -190,7 +199,7 @@ class CaptureBatchEditRegressionTest {
         compose.onNodeWithText("工资").assertExists()
         compose.onNodeWithText("9/1").assertExists()
         compose.onNodeWithText("9/3").assertExists()
-        compose.onNodeWithText("编辑").performClick()
+        openEditor()
         compose.onNodeWithTag("capture-text-editor").assertTextEquals(edited)
         compose.onNodeWithText("完成").performClick()
         saveAndAwaitCompletion("✨ 保存2笔")
@@ -234,7 +243,7 @@ class CaptureBatchEditRegressionTest {
 
         compose.onNodeWithText("编辑识别文本").assertDoesNotExist()
         compose.onNodeWithText("✨ AI记账").assertIsNotEnabled()
-        compose.onNodeWithText("编辑").performClick()
+        openEditor()
         assertEquals(
             "",
             compose.onNodeWithTag("capture-text-editor").fetchSemanticsNode()
@@ -268,7 +277,7 @@ class CaptureBatchEditRegressionTest {
         launchRecognition()
         compose.onNodeWithTag("capture-split-mode").performClick()
         compose.onNode(hasSetTextAction()).performTextReplacement("午餐 ¥28.50\n公交 ¥3.00\n工资 ¥50.00")
-        compose.onNodeWithText("编辑").performClick()
+        openEditor()
         compose.onNodeWithTag("capture-text-editor").performTextReplacement("工资 ¥60.00")
         compose.onNodeWithContentDescription("关闭").performClick()
         SystemClock.sleep(1_200)

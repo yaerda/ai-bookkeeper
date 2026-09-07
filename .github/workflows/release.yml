@@ -60,6 +60,16 @@ jobs:
             ./gradlew :feature-input:connectedDebugAndroidTest :core-data:connectedDebugAndroidTest :app:connectedDebugAndroidTest --no-daemon --stacktrace
             && ./gradlew :feature-capture:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.aibookkeeper.feature.capture.ocr.CaptureBatchEditRegressionTest --no-daemon --stacktrace
 
+      - name: Upload Android release gate reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-gate-reports
+          path: |
+            **/build/reports/androidTests/connected/
+            **/build/outputs/androidTest-results/connected/
+          retention-days: 7
+
       - name: Get APK path
         id: apk
         run: |

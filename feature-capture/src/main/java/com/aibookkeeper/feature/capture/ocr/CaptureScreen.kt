@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -161,6 +162,7 @@ internal fun CaptureScreen(
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var showFullscreenEditor by remember { mutableStateOf(false) }
     var showResultPage by remember { mutableStateOf(false) }
+    val resultScrollState = rememberScrollState()
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var pendingImageAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
@@ -723,6 +725,7 @@ internal fun CaptureScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
+                        .imePadding()
                         .padding(16.dp)
                         .testTag("capture-text-editor"),
                     placeholder = { Text("OCR 识别结果") }
@@ -731,7 +734,7 @@ internal fun CaptureScreen(
         }
     }
 
-    if (showResultPage) {
+    if (showResultPage && !showFullscreenEditor) {
         Dialog(
             onDismissRequest = { showResultPage = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -752,13 +755,14 @@ internal fun CaptureScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
+                        .imePadding()
                 ) {
                     // Scrollable content area
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 16.dp)
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(resultScrollState)
                     ) {
                     if (isProcessing) {
                         ProcessingStatusCard()

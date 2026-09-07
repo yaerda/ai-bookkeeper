@@ -164,3 +164,13 @@ jobs:
           script: >-
             ./gradlew :feature-input:connectedDebugAndroidTest :core-data:connectedDebugAndroidTest :app:connectedDebugAndroidTest --no-daemon --stacktrace
             && ./gradlew :feature-capture:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.aibookkeeper.feature.capture.ocr.CaptureBatchEditRegressionTest --no-daemon --stacktrace
+
+      - name: Upload Android integration reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-integration-reports
+          path: |
+            **/build/reports/androidTests/connected/
+            **/build/outputs/androidTest-results/connected/
+          retention-days: 7
