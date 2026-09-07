@@ -75,6 +75,7 @@ import com.aibookkeeper.feature.input.common.resolveCategoryIcon
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.feature.input.components.transactionRecordedBySummary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -166,6 +167,8 @@ fun TransactionDetailScreen(
                 TransactionDetailContent(
                     transaction = state.transaction,
                     categories = categories.filter { it.type == state.transaction.type },
+                    showRecordedBy = ledgerState.isSignedIn &&
+                        ledgerState.selectedLedger.mode == "FAMILY",
                     canEdit = ledgerState.canEdit,
                     onDelete = {
                         viewModel.deleteTransaction { navController.popBackStack() }
@@ -186,6 +189,7 @@ fun TransactionDetailScreen(
 private fun TransactionDetailContent(
     transaction: Transaction,
     categories: List<com.aibookkeeper.core.data.model.Category>,
+    showRecordedBy: Boolean,
     onDelete: () -> Unit,
     onUpdate: (Double, Long?, String, String?, java.time.LocalDateTime) -> Unit,
     onAddCategory: (String, String) -> Unit,
@@ -494,6 +498,18 @@ private fun TransactionDetailContent(
                     if (!transaction.originalInput.isNullOrBlank()) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         DetailRow(label = "原始输入", value = transaction.originalInput.orEmpty())
+                    }
+
+                    if (showRecordedBy) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        DetailRow(
+                            label = "记录人",
+                            value = transactionRecordedBySummary(
+                                transaction,
+                                showFamily = true,
+                                showUnknown = true
+                            ).orEmpty()
+                        )
                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

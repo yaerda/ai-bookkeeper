@@ -55,7 +55,10 @@ interface TransactionRepository {
         syncId: String,
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
-        serverVersion: Long
+        serverVersion: Long,
+        recordedByUserId: String? = null,
+        recordedByDisplayName: String? = null,
+        recordedByEmail: String? = null
     ): Boolean
 
     suspend fun rebasePendingSync(
@@ -65,6 +68,10 @@ interface TransactionRepository {
     ): Boolean
 
     suspend fun mergeRemote(transaction: Transaction): Boolean
+
+    suspend fun needsRecordedByMetadataRefresh(): Boolean = false
+
+    suspend fun refreshRecordedByMetadata(transaction: Transaction): Boolean = false
 
     suspend fun getMonthlyExpense(yearMonth: YearMonth): Double
 

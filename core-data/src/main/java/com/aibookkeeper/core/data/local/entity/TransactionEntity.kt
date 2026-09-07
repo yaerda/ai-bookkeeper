@@ -79,5 +79,14 @@ data class TransactionEntity(
     val serverVersion: Long = 0,
 
     @ColumnInfo(name = "deletedAt")
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+
+    @ColumnInfo(name = "recordedByUserId")
+    val recordedByUserId: String? = null,
+
+    @ColumnInfo(name = "recordedByDisplayName")
+    val recordedByDisplayName: String? = null,
+
+    @ColumnInfo(name = "recordedByEmail")
+    val recordedByEmail: String? = null
 )

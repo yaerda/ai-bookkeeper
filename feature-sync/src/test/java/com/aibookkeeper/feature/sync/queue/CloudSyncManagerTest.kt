@@ -31,6 +31,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -82,7 +83,10 @@ class CloudSyncManagerTest {
         source = local.source.name,
         status = local.status.name,
         aiConfidence = null,
-        deletedAt = null
+        deletedAt = null,
+        recordedByUserId = "owner-user",
+        recordedByDisplayName = "Cloud Owner",
+        recordedByEmail = "owner@example.com"
     )
 
     @BeforeEach
@@ -98,6 +102,8 @@ class CloudSyncManagerTest {
         every { repository.observePendingSyncCount() } returns flowOf(0)
         coEvery { tokenProvider.invalidate() } returns Unit
         coEvery { categorySync.syncDefault(any()) } returns emptyList()
+        every { preferences.isRecordedByMetadataRefreshComplete(any()) } returns true
+        every { preferences.markRecordedByMetadataRefreshComplete(any()) } returns Unit
     }
 
     @Test
@@ -148,6 +154,76 @@ class CloudSyncManagerTest {
     }
 
     @Test
+    fun `one-time recorder refresh replays authoritative history without changing normal cursor`() = runTest {
+        signedIn()
+        every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsRecordedByMetadataRefresh() } returns true
+        coEvery { repository.refreshRecordedByMetadata(any()) } returnsMany listOf(true, false)
+        coEvery { repository.getPendingSync() } returns emptyList()
+        coEvery { api.pull(any(), 0, 500) } returns Response.success(
+            PullResponse(listOf(remote), nextCursor = 11, hasMore = true)
+        )
+        coEvery { api.pull(any(), 11, 500) } returns Response.success(
+            PullResponse(listOf(remote.copy(syncId = "other", recordedByUserId = null, recordedByDisplayName = null, recordedByEmail = null)), nextCursor = 17, hasMore = false)
+        )
+        every { preferences.cursor() } returns 7
+        coEvery { api.pull(any(), 7, 200) } returns Response.success(
+            PullResponse(emptyList(), nextCursor = 7, hasMore = false)
+        )
+        every { preferences.updateCursor(7) } returns Unit
+
+        manager.syncNow().getOrThrow()
+
+        coVerifyOrder {
+            categorySync.syncDefault(any())
+            repository.needsRecordedByMetadataRefresh()
+            api.pull(any(), 0, 500)
+            repository.refreshRecordedByMetadata(match { it.syncId == remote.syncId })
+            api.pull(any(), 11, 500)
+            repository.refreshRecordedByMetadata(match { it.syncId == "other" })
+        }
+        verify { preferences.markRecordedByMetadataRefreshComplete("account-a") }
+        verify(exactly = 1) { preferences.updateCursor(7) }
+    }
+
+    @Test
+    fun `completed recorder refresh is marked without replay when nothing is missing`() = runTest {
+        signedIn()
+        every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsRecordedByMetadataRefresh() } returns false
+        coEvery { repository.getPendingSync() } returns emptyList()
+        every { preferences.cursor() } returns 3
+        coEvery { api.pull(any(), 3, 200) } returns Response.success(
+            PullResponse(emptyList(), nextCursor = 3, hasMore = false)
+        )
+        every { preferences.updateCursor(3) } returns Unit
+
+        manager.syncNow().getOrThrow()
+
+        verify { preferences.markRecordedByMetadataRefreshComplete("account-a") }
+        coVerify(exactly = 0) { repository.refreshRecordedByMetadata(any()) }
+        coVerify(exactly = 0) { api.pull(any(), 0, 500) }
+    }
+
+    @Test
+    fun `refresh failure stays retryable and leaves completion flag unset`() = runTest {
+        signedIn()
+        every { preferences.isRecordedByMetadataRefreshComplete("account-a") } returns false
+        coEvery { repository.needsRecordedByMetadataRefresh() } returns true
+        coEvery { api.pull(any(), 0, 500) } returns Response.error(
+            503,
+            "{}".toResponseBody("application/json".toMediaType())
+        )
+
+        val failure = manager.syncNow().exceptionOrNull()
+
+        assertInstanceOf(RetryableSyncException::class.java, failure)
+        verify(exactly = 0) { preferences.markRecordedByMetadataRefreshComplete(any()) }
+        coVerify(exactly = 0) { repository.getPendingSync() }
+        verify(exactly = 0) { preferences.updateCursor(any()) }
+    }
+
+    @Test
     fun `uploads all pending data before pulling and acknowledges exact snapshot`() = runTest {
         signedIn()
         coEvery { repository.getPendingSync() } returns listOf(local)
@@ -155,7 +231,15 @@ class CloudSyncManagerTest {
             PushResponse(accepted = listOf(remote), conflicts = emptyList())
         )
         coEvery {
-            repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11)
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                0,
+                11,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
         } returns true
         every { preferences.cursor() } returns 0
         coEvery { api.pull(any(), 0, any()) } returns Response.success(
@@ -173,7 +257,15 @@ class CloudSyncManagerTest {
             categorySync.syncDefault(any())
             repository.getPendingSync()
             api.push(any(), any())
-            repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11)
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                0,
+                11,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
             api.pull(any(), 0, any())
         }
     }
@@ -186,7 +278,15 @@ class CloudSyncManagerTest {
             PushResponse(accepted = listOf(remote), conflicts = emptyList())
         )
         coEvery {
-            repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11)
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                0,
+                11,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
         } returns false
         emptyPull()
 
@@ -207,7 +307,17 @@ class CloudSyncManagerTest {
         coEvery { api.push(any(), capture(request)) } returns Response.success(
             PushResponse(listOf(remote.copy(categoryId = cloud.id)), emptyList())
         )
-        coEvery { repository.acknowledgeSynced(local.syncId, local.updatedAt, 0, 11) } returns true
+        coEvery {
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                0,
+                11,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
+        } returns true
         emptyPull()
 
         manager.syncNow().getOrThrow()
@@ -245,7 +355,15 @@ class CloudSyncManagerTest {
         )
         coEvery { repository.rebasePendingSync(local.syncId, 0, 11) } returns true
         coEvery {
-            repository.acknowledgeSynced(local.syncId, local.updatedAt, 11, 12)
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                11,
+                12,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
         } returns true
         emptyPull()
 
@@ -255,7 +373,15 @@ class CloudSyncManagerTest {
         assertEquals(1, report.uploaded)
         coVerify { repository.rebasePendingSync(local.syncId, 0, 11) }
         coVerify {
-            repository.acknowledgeSynced(local.syncId, local.updatedAt, 11, 12)
+            repository.acknowledgeSynced(
+                local.syncId,
+                local.updatedAt,
+                11,
+                12,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
         }
         coVerify(exactly = 0) { repository.mergeRemote(any()) }
     }
@@ -288,6 +414,35 @@ class CloudSyncManagerTest {
 
         assertEquals(1, report.conflicts)
         assertEquals(0, report.downloaded)
+    }
+
+    @Test
+    fun `pull merges recorded-by fields for local cache display`() = runTest {
+        signedIn()
+        coEvery { repository.getPendingSync() } returns emptyList()
+        every { preferences.cursor() } returns 0
+        coEvery { api.pull(any(), 0, any()) } returns Response.success(
+            PullResponse(
+                listOf(
+                    remote.copy(
+                        recordedByUserId = "editor-user",
+                        recordedByDisplayName = null,
+                        recordedByEmail = "editor@example.com"
+                    )
+                ),
+                nextCursor = 11,
+                hasMore = false
+            )
+        )
+        val merged = slot<Transaction>()
+        coEvery { repository.mergeRemote(capture(merged)) } returns true
+        every { preferences.updateCursor(11) } returns Unit
+
+        manager.syncNow().getOrThrow()
+
+        assertEquals("editor-user", merged.captured.recordedByUserId)
+        assertEquals("editor@example.com", merged.captured.recordedByEmail)
+        assertNull(merged.captured.recordedByDisplayName)
     }
 
     @Test
@@ -373,7 +528,7 @@ class CloudSyncManagerTest {
             )
         }
         coEvery {
-            repository.acknowledgeSynced(any(), any(), any(), any())
+            repository.acknowledgeSynced(any(), any(), any(), any(), any(), any(), any())
         } returns true
         emptyPull()
 
@@ -403,7 +558,12 @@ class CloudSyncManagerTest {
                 else -> Response.success(
                     PushResponse(
                         accepted = listOf(
-                            request.transactions.single().copy(serverVersion = 9)
+                            request.transactions.single().copy(
+                                serverVersion = 9,
+                                recordedByUserId = remote.recordedByUserId,
+                                recordedByDisplayName = remote.recordedByDisplayName,
+                                recordedByEmail = remote.recordedByEmail
+                            )
                         ),
                         conflicts = emptyList()
                     )
@@ -411,7 +571,15 @@ class CloudSyncManagerTest {
             }
         }
         coEvery {
-            repository.acknowledgeSynced(valid.syncId, valid.updatedAt, 0, 9)
+            repository.acknowledgeSynced(
+                valid.syncId,
+                valid.updatedAt,
+                0,
+                9,
+                "owner-user",
+                "Cloud Owner",
+                "owner@example.com"
+            )
         } returns true
         emptyPull()
 

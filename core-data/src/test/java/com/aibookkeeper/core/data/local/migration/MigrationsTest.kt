@@ -28,4 +28,20 @@ class MigrationsTest {
         assertTrue(sql.contains("'4' || SUBSTR(HEX(RANDOMBLOB(2)), 2, 3)"))
         assertTrue(sql.contains("SUBSTR('89AB', 1 + ABS(RANDOM() % 4), 1)"))
     }
+
+    @Test
+    fun `migration 4 to 5 adds additive recorded-by columns only`() {
+        val statements = mutableListOf<String>()
+        val database = mockk<SupportSQLiteDatabase>()
+        every { database.execSQL(capture(statements)) } just runs
+
+        Migrations.MIGRATION_4_5.migrate(database)
+
+        val sql = statements.joinToString("\n").uppercase()
+        assertFalse(sql.contains("DROP TABLE"))
+        assertFalse(Regex("\\bDELETE\\b").containsMatchIn(sql))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN RECORDEDBYUSERID"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN RECORDEDBYDISPLAYNAME"))
+        assertTrue(sql.contains("ALTER TABLE TRANSACTIONS ADD COLUMN RECORDEDBYEMAIL"))
+    }
 }

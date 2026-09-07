@@ -1,6 +1,7 @@
 package com.aibookkeeper.feature.sync.network
 
 import com.aibookkeeper.core.data.repository.familyIdentityLabel
+import com.aibookkeeper.core.data.model.transactionRecordedByLabel
 import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.Body
@@ -31,8 +32,14 @@ data class SyncTransactionDto(
     val source: String,
     val status: String,
     val aiConfidence: Float?,
-    val deletedAt: Long?
+    val deletedAt: Long?,
+    val recordedByUserId: String? = null,
+    val recordedByDisplayName: String? = null,
+    val recordedByEmail: String? = null
 )
+
+val SyncTransactionDto.recordedByLabel: String?
+    get() = transactionRecordedByLabel(recordedByDisplayName, recordedByEmail, recordedByUserId)
 
 @Serializable
 data class PushRequest(val transactions: List<SyncTransactionDto>)

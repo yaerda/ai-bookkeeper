@@ -26,16 +26,62 @@ interface TransactionDao {
 
     @androidx.room.Transaction
     suspend fun updateMonotonic(transaction: TransactionEntity) {
-        val current = getBySyncId(transaction.syncId)
-        update(
-            transaction.copy(
-                updatedAt = maxOf(
-                    transaction.updatedAt,
-                    (current?.updatedAt ?: Long.MIN_VALUE) + 1
-                )
-            )
+        updateMutablePreservingRemoteFields(
+            id = transaction.id,
+            amount = transaction.amount,
+            type = transaction.type,
+            categoryId = transaction.categoryId,
+            merchantName = transaction.merchantName,
+            note = transaction.note,
+            originalInput = transaction.originalInput,
+            date = transaction.date,
+            createdAt = transaction.createdAt,
+            updatedAt = transaction.updatedAt,
+            source = transaction.source,
+            status = transaction.status,
+            syncStatus = transaction.syncStatus,
+            aiConfidence = transaction.aiConfidence
         )
     }
+
+    @Query(
+        """
+        UPDATE transactions
+        SET amount = :amount,
+            type = :type,
+            categoryId = :categoryId,
+            merchantName = :merchantName,
+            note = :note,
+            originalInput = :originalInput,
+            date = :date,
+            createdAt = :createdAt,
+            updatedAt = CASE
+                WHEN :updatedAt > updatedAt THEN :updatedAt
+                ELSE updatedAt + 1
+            END,
+            source = :source,
+            status = :status,
+            syncStatus = :syncStatus,
+            aiConfidence = :aiConfidence
+        WHERE id = :id
+        """
+    )
+    suspend fun updateMutablePreservingRemoteFields(
+        id: Long,
+        amount: Double,
+        type: String,
+        categoryId: Long?,
+        merchantName: String?,
+        note: String?,
+        originalInput: String?,
+        date: Long,
+        createdAt: Long,
+        updatedAt: Long,
+        source: String,
+        status: String,
+        syncStatus: String,
+        aiConfidence: Float?
+    )
 
     @Query("""
         UPDATE transactions
@@ -182,9 +228,27 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncId = :syncId LIMIT 1")
     suspend fun getBySyncId(syncId: String): TransactionEntity?
 
+    @Query(
+        """
+        SELECT EXISTS(
+            SELECT 1
+            FROM transactions
+            WHERE syncStatus = 'SYNCED'
+              AND recordedByUserId IS NULL
+              AND recordedByDisplayName IS NULL
+              AND recordedByEmail IS NULL
+            LIMIT 1
+        )
+        """
+    )
+    suspend fun hasSyncedTransactionsMissingRecordedBy(): Boolean
+
     @Query("""
         UPDATE transactions
         SET serverVersion = :serverVersion,
+            recordedByUserId = :recordedByUserId,
+            recordedByDisplayName = :recordedByDisplayName,
+            recordedByEmail = :recordedByEmail,
             syncStatus = CASE
                 WHEN updatedAt = :expectedUpdatedAt THEN 'SYNCED'
                 ELSE syncStatus
@@ -196,7 +260,30 @@ interface TransactionDao {
         syncId: String,
         expectedUpdatedAt: Long,
         expectedServerVersion: Long,
-        serverVersion: Long
+        serverVersion: Long,
+        recordedByUserId: String?,
+        recordedByDisplayName: String?,
+        recordedByEmail: String?
+    ): Int
+
+    @Query(
+        """
+        UPDATE transactions
+        SET recordedByUserId = :recordedByUserId,
+            recordedByDisplayName = :recordedByDisplayName,
+            recordedByEmail = :recordedByEmail
+        WHERE syncId = :syncId
+          AND syncStatus = 'SYNCED'
+          AND recordedByUserId IS NULL
+          AND recordedByDisplayName IS NULL
+          AND recordedByEmail IS NULL
+        """
+    )
+    suspend fun refreshRecordedByMetadata(
+        syncId: String,
+        recordedByUserId: String?,
+        recordedByDisplayName: String?,
+        recordedByEmail: String?
     ): Int
 
     @Query("""

@@ -174,12 +174,18 @@ class TransactionRepositoryImpl @Inject constructor(
         syncId: String,
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
-        serverVersion: Long
+        serverVersion: Long,
+        recordedByUserId: String?,
+        recordedByDisplayName: String?,
+        recordedByEmail: String?
     ): Boolean = transactionDao.acknowledgeSync(
         syncId = syncId,
         expectedUpdatedAt = expectedUpdatedAt.toEpochMillis(),
         expectedServerVersion = expectedServerVersion,
-        serverVersion = serverVersion
+        serverVersion = serverVersion,
+        recordedByUserId = recordedByUserId,
+        recordedByDisplayName = recordedByDisplayName,
+        recordedByEmail = recordedByEmail
     ) == 1
 
     override suspend fun rebasePendingSync(
@@ -210,6 +216,17 @@ class TransactionRepositoryImpl @Inject constructor(
             )
         )
     }
+
+    override suspend fun needsRecordedByMetadataRefresh(): Boolean =
+        transactionDao.hasSyncedTransactionsMissingRecordedBy()
+
+    override suspend fun refreshRecordedByMetadata(transaction: Transaction): Boolean =
+        transactionDao.refreshRecordedByMetadata(
+            syncId = transaction.syncId,
+            recordedByUserId = transaction.recordedByUserId,
+            recordedByDisplayName = transaction.recordedByDisplayName,
+            recordedByEmail = transaction.recordedByEmail
+        ) == 1
 
     override suspend fun getMonthlyExpense(yearMonth: YearMonth): Double =
         transactionDao.sumByTypeAndDateRange(

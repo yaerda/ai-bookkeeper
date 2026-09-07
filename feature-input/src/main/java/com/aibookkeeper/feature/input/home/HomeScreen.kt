@@ -93,8 +93,10 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.aibookkeeper.feature.input.components.holdToTalkGesture
+import com.aibookkeeper.feature.input.components.joinTransactionMeta
 import com.aibookkeeper.feature.input.components.rememberSpeechInputSession
 import com.aibookkeeper.feature.input.components.SpeechPhase
+import com.aibookkeeper.feature.input.components.transactionRecordedBySummary
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -366,6 +368,7 @@ fun HomeScreen(
                 ) { transaction ->
                     RecentTransactionItem(
                         transaction = transaction,
+                        showRecordedBy = uiState.showFamilyTransactionAuthors,
                         onClick = { navController.navigate("transaction/${transaction.id}") }
                     )
                 }
@@ -675,7 +678,11 @@ private fun SummarySection(uiState: HomeUiState) {
 }
 
 @Composable
-private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit = {}) {
+private fun RecentTransactionItem(
+    transaction: Transaction,
+    showRecordedBy: Boolean,
+    onClick: () -> Unit = {}
+) {
     val emoji = CategoryIconMapper.getEmoji(transaction.categoryIcon)
 
     Row(
@@ -708,11 +715,11 @@ private fun RecentTransactionItem(transaction: Transaction, onClick: () -> Unit 
             val dateText = try {
                 transaction.date.format(DateTimeFormatter.ofPattern("M/d"))
             } catch (_: Exception) { "" }
-            val subtitle = when {
-                !noteText.isNullOrBlank() && dateText.isNotBlank() -> "$noteText · $dateText"
-                !noteText.isNullOrBlank() -> noteText
-                else -> dateText
-            }
+            val subtitle = joinTransactionMeta(
+                transactionRecordedBySummary(transaction, showFamily = showRecordedBy),
+                noteText,
+                dateText
+            )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,

@@ -51,7 +51,10 @@ class TransactionMapperTest {
         source = source,
         status = status,
         syncStatus = syncStatus,
-        aiConfidence = aiConfidence
+        aiConfidence = aiConfidence,
+        recordedByUserId = "user-1",
+        recordedByDisplayName = "Cloud Name",
+        recordedByEmail = "cloud@example.test"
     )
 
     private fun createEntity(
@@ -80,7 +83,10 @@ class TransactionMapperTest {
         source = source,
         status = status,
         syncStatus = syncStatus,
-        aiConfidence = aiConfidence
+        aiConfidence = aiConfidence,
+        recordedByUserId = "user-1",
+        recordedByDisplayName = "Cloud Name",
+        recordedByEmail = "cloud@example.test"
     )
 
     // ── toDomain ─────────────────────────────────────────────────────────
@@ -104,6 +110,9 @@ class TransactionMapperTest {
             assertEquals(TransactionStatus.CONFIRMED, domain.status)
             assertEquals(SyncStatus.LOCAL, domain.syncStatus)
             assertEquals(0.95f, domain.aiConfidence)
+            assertEquals("user-1", domain.recordedByUserId)
+            assertEquals("Cloud Name", domain.recordedByDisplayName)
+            assertEquals("cloud@example.test", domain.recordedByEmail)
         }
 
         @Test
@@ -193,6 +202,9 @@ class TransactionMapperTest {
             assertEquals("CONFIRMED", entity.status)
             assertEquals("LOCAL", entity.syncStatus)
             assertEquals(0.95f, entity.aiConfidence)
+            assertEquals("user-1", entity.recordedByUserId)
+            assertEquals("Cloud Name", entity.recordedByDisplayName)
+            assertEquals("cloud@example.test", entity.recordedByEmail)
         }
 
         @Test

@@ -9,6 +9,7 @@ import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.feature.sync.auth.AccessToken
 import com.aibookkeeper.feature.sync.auth.AuthenticationRequiredException
 import com.aibookkeeper.feature.sync.auth.TokenProvider
 import com.aibookkeeper.feature.sync.ledger.withCatalog
@@ -79,6 +80,7 @@ class CloudSyncManager @Inject constructor(
             }
 
             val catalog = categorySync.syncDefault(token)
+            refreshRecordedByMetadataIfNeeded(token)
 
             val firstUpload = uploadPending(
                 token.value,
@@ -171,7 +173,10 @@ class CloudSyncManager @Inject constructor(
                         syncId = accepted.syncId,
                         expectedUpdatedAt = original.updatedAt,
                         expectedServerVersion = original.serverVersion,
-                        serverVersion = accepted.serverVersion
+                        serverVersion = accepted.serverVersion,
+                        recordedByUserId = accepted.recordedByUserId,
+                        recordedByDisplayName = accepted.recordedByDisplayName,
+                        recordedByEmail = accepted.recordedByEmail
                     )
                 ) {
                     uploaded++
@@ -221,8 +226,34 @@ class CloudSyncManager @Inject constructor(
         throw response.toSyncException("上传")
     }
 
-    private suspend fun pull(accessToken: String, cursor: Long): PullResponse {
-        val response = api.pull("Bearer $accessToken", cursor)
+    private suspend fun refreshRecordedByMetadataIfNeeded(token: AccessToken) {
+        if (preferences.isRecordedByMetadataRefreshComplete(token.accountId)) {
+            return
+        }
+        if (!repository.needsRecordedByMetadataRefresh()) {
+            preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+            return
+        }
+        var cursor = 0L
+        do {
+            val page = pull(token.value, cursor, RECORDED_BY_REFRESH_BATCH_SIZE)
+            page.transactions.forEach { remote ->
+                repository.refreshRecordedByMetadata(remote.toDomainTransaction())
+            }
+            if (page.hasMore && page.nextCursor <= cursor) {
+                throw IOException("同步游标没有前进")
+            }
+            cursor = page.nextCursor
+        } while (page.hasMore)
+        preferences.markRecordedByMetadataRefreshComplete(token.accountId)
+    }
+
+    private suspend fun pull(
+        accessToken: String,
+        cursor: Long,
+        limit: Int = MAX_PULL_BATCH_SIZE
+    ): PullResponse {
+        val response = api.pull("******", cursor, limit)
         if (response.code() == 401 || response.code() == 403) {
             tokenProvider.invalidate()
             throw AuthenticationRequiredException()
@@ -245,6 +276,8 @@ class CloudSyncManager @Inject constructor(
 
     private companion object {
         const val MAX_PUSH_BATCH_SIZE = 200
+        const val MAX_PULL_BATCH_SIZE = 200
+        const val RECORDED_BY_REFRESH_BATCH_SIZE = 500
     }
 }
 

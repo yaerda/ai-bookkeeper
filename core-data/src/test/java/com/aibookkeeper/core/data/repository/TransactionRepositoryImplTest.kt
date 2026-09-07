@@ -554,14 +554,25 @@ class TransactionRepositoryImplTest {
         @Test
         fun should_acknowledgeOnlyExactUploadedSnapshot() = runTest {
             coEvery {
-                transactionDao.acknowledgeSync(sampleDomain.syncId, any(), 0, 12)
+                transactionDao.acknowledgeSync(
+                    sampleDomain.syncId,
+                    any(),
+                    0,
+                    12,
+                    "user-1",
+                    "Cloud Name",
+                    "cloud@example.test"
+                )
             } returns 1
 
             val acknowledged = repository.acknowledgeSynced(
                 sampleDomain.syncId,
                 sampleDomain.updatedAt,
                 0,
-                12
+                12,
+                "user-1",
+                "Cloud Name",
+                "cloud@example.test"
             )
 
             assertTrue(acknowledged)
@@ -570,7 +581,10 @@ class TransactionRepositoryImplTest {
                     sampleDomain.syncId,
                     any(),
                     0,
-                    12
+                    12,
+                    "user-1",
+                    "Cloud Name",
+                    "cloud@example.test"
                 )
             }
         }
@@ -595,13 +609,19 @@ class TransactionRepositoryImplTest {
                 categoryId = 999,
                 categoryName = "餐饮",
                 serverVersion = 12,
-                syncStatus = SyncStatus.SYNCED
+                syncStatus = SyncStatus.SYNCED,
+                recordedByUserId = "member-7",
+                recordedByDisplayName = "Member Name",
+                recordedByEmail = "member@example.test"
             )
             val mapped = sampleEntity.copy(
                 id = 0,
                 categoryId = 2,
                 serverVersion = 12,
-                syncStatus = "SYNCED"
+                syncStatus = "SYNCED",
+                recordedByUserId = "member-7",
+                recordedByDisplayName = "Member Name",
+                recordedByEmail = "member@example.test"
             )
             coEvery { categoryDao.resolveRemoteCategory("餐饮", "EXPENSE", any(), any()) } returns 2L
             every {
@@ -612,6 +632,43 @@ class TransactionRepositoryImplTest {
             assertTrue(repository.mergeRemote(remote))
 
             coVerify { transactionDao.mergeRemote(mapped) }
+        }
+
+        @Test
+        fun should_reportWhetherHistoricalRecordedByMetadataNeedsRefresh() = runTest {
+            coEvery { transactionDao.hasSyncedTransactionsMissingRecordedBy() } returns true
+
+            assertTrue(repository.needsRecordedByMetadataRefresh())
+
+            coVerify { transactionDao.hasSyncedTransactionsMissingRecordedBy() }
+        }
+
+        @Test
+        fun should_refreshRecordedByMetadata_onlyForMatchingSyncedRows() = runTest {
+            val remote = sampleDomain.copy(
+                recordedByUserId = "member-7",
+                recordedByDisplayName = "Member Name",
+                recordedByEmail = "member@example.test"
+            )
+            coEvery {
+                transactionDao.refreshRecordedByMetadata(
+                    remote.syncId,
+                    "member-7",
+                    "Member Name",
+                    "member@example.test"
+                )
+            } returns 1
+
+            assertTrue(repository.refreshRecordedByMetadata(remote))
+
+            coVerify {
+                transactionDao.refreshRecordedByMetadata(
+                    remote.syncId,
+                    "member-7",
+                    "Member Name",
+                    "member@example.test"
+                )
+            }
         }
     }
 }

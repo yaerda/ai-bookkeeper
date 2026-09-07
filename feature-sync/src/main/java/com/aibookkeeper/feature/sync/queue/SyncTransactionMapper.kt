@@ -28,7 +28,10 @@ internal fun Transaction.toSyncDto() = SyncTransactionDto(
     source = source.name,
     status = status.name,
     aiConfidence = aiConfidence,
-    deletedAt = deletedAt?.toEpochMillis()
+    deletedAt = deletedAt?.toEpochMillis(),
+    recordedByUserId = recordedByUserId,
+    recordedByDisplayName = recordedByDisplayName,
+    recordedByEmail = recordedByEmail
 )
 
 internal fun SyncTransactionDto.toDomainTransaction() = Transaction(
@@ -51,7 +54,10 @@ internal fun SyncTransactionDto.toDomainTransaction() = Transaction(
     aiConfidence = aiConfidence,
     syncId = syncId,
     serverVersion = serverVersion,
-    deletedAt = deletedAt?.toLocalDateTime()
+    deletedAt = deletedAt?.toLocalDateTime(),
+    recordedByUserId = recordedByUserId,
+    recordedByDisplayName = recordedByDisplayName,
+    recordedByEmail = recordedByEmail
 )
 
 private fun stableRemoteId(syncId: String): Long {

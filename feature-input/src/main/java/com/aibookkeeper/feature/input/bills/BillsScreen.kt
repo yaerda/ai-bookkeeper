@@ -66,6 +66,8 @@ import com.aibookkeeper.core.common.util.CategoryIconMapper
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
+import com.aibookkeeper.feature.input.components.joinTransactionMeta
+import com.aibookkeeper.feature.input.components.transactionRecordedBySummary
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -193,6 +195,7 @@ fun BillsScreen(
                         ) { transaction ->
                             SwipeToDeleteTransactionItem(
                                 transaction = transaction,
+                                showRecordedBy = uiState.showFamilyTransactionAuthors,
                                 onDelete = { tx ->
                                     viewModel.deleteTransaction(tx.id)
                                     scope.launch {
@@ -337,6 +340,7 @@ private fun DayHeader(dayGroup: DayGroup) {
 @Composable
 private fun SwipeToDeleteTransactionItem(
     transaction: Transaction,
+    showRecordedBy: Boolean,
     onDelete: (Transaction) -> Unit,
     onClick: () -> Unit
 ) {
@@ -373,6 +377,7 @@ private fun SwipeToDeleteTransactionItem(
     ) {
         TransactionItem(
             transaction = transaction,
+            showRecordedBy = showRecordedBy,
             onClick = onClick
         )
     }
@@ -381,6 +386,7 @@ private fun SwipeToDeleteTransactionItem(
 @Composable
 private fun TransactionItem(
     transaction: Transaction,
+    showRecordedBy: Boolean,
     onClick: () -> Unit
 ) {
     Column(
@@ -417,13 +423,11 @@ private fun TransactionItem(
             val timeText = try {
                 transaction.date.format(java.time.format.DateTimeFormatter.ofPattern("M/d"))
             } catch (_: Exception) { "" }
-            val subtitle = buildString {
-                if (transaction.note?.isNotBlank() == true) {
-                    append(transaction.note)
-                    append(" · ")
-                }
-                append(timeText)
-            }
+            val subtitle = joinTransactionMeta(
+                transactionRecordedBySummary(transaction, showFamily = showRecordedBy),
+                transaction.note,
+                timeText
+            )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,

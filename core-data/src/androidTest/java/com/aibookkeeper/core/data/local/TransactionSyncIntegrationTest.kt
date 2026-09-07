@@ -87,7 +87,10 @@ class TransactionSyncIntegrationTest {
             syncId = original.syncId,
             expectedUpdatedAt = 100,
             expectedServerVersion = 0,
-            serverVersion = 9
+            serverVersion = 9,
+            recordedByUserId = "writer-1",
+            recordedByDisplayName = "Cloud Writer",
+            recordedByEmail = "writer@example.test"
         )
 
         assertEquals(1, changed)
@@ -95,6 +98,9 @@ class TransactionSyncIntegrationTest {
         assertEquals(9, stored.serverVersion)
         assertEquals("PENDING_SYNC", stored.syncStatus)
         assertEquals("new edit", stored.note)
+        assertEquals("writer-1", stored.recordedByUserId)
+        assertEquals("Cloud Writer", stored.recordedByDisplayName)
+        assertEquals("writer@example.test", stored.recordedByEmail)
     }
 
     @Test
@@ -108,13 +114,54 @@ class TransactionSyncIntegrationTest {
             syncId = original.syncId,
             expectedUpdatedAt = 100,
             expectedServerVersion = 0,
-            serverVersion = 9
+            serverVersion = 9,
+            recordedByUserId = "writer-1",
+            recordedByDisplayName = "Cloud Writer",
+            recordedByEmail = "writer@example.test"
         )
 
         val stored = dao.getBySyncId(original.syncId)!!
         assertEquals(101, stored.updatedAt)
         assertEquals("PENDING_SYNC", stored.syncStatus)
         assertEquals("new edit", stored.note)
+        assertEquals("writer-1", stored.recordedByUserId)
+        assertEquals("Cloud Writer", stored.recordedByDisplayName)
+        assertEquals("writer@example.test", stored.recordedByEmail)
+    }
+
+    @Test
+    fun localEditPreservesRecorderMetadataAndServerVersionFilledAfterSnapshotWasRead() = runBlocking {
+        val dao = createDatabase().transactionDao()
+        val original = entity(updatedAt = 100, serverVersion = 0)
+        val id = dao.insert(original)
+        val staleEdit = original.copy(
+            id = id,
+            note = "edited after ack",
+            updatedAt = 200,
+            serverVersion = 0,
+            recordedByUserId = null,
+            recordedByDisplayName = null,
+            recordedByEmail = null
+        )
+
+        dao.acknowledgeSync(
+            syncId = original.syncId,
+            expectedUpdatedAt = 100,
+            expectedServerVersion = 0,
+            serverVersion = 9,
+            recordedByUserId = "writer-2",
+            recordedByDisplayName = "Cloud Editor",
+            recordedByEmail = "editor@example.test"
+        )
+        dao.updateMonotonic(staleEdit)
+
+        val stored = dao.getBySyncId(original.syncId)!!
+        assertEquals(9, stored.serverVersion)
+        assertEquals("edited after ack", stored.note)
+        assertEquals("PENDING_SYNC", stored.syncStatus)
+        assertEquals("writer-2", stored.recordedByUserId)
+        assertEquals("Cloud Editor", stored.recordedByDisplayName)
+        assertEquals("editor@example.test", stored.recordedByEmail)
     }
 
     @Test

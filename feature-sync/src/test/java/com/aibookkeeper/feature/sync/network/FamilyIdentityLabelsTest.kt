@@ -43,4 +43,16 @@ class FamilyIdentityLabelsTest {
         assertEquals("member@example.test", member.email)
         assertEquals("member@example.test", member.copy(displayName = null).displayLabel)
     }
+
+    @Test
+    fun `transaction author labels distinguish known, former and unknown legacy rows`() {
+        val named = json.decodeFromString<SyncTransactionDto>(
+            """{"syncId":"0ec11d58-589d-40c5-bc30-e4524b539a2c","serverVersion":2,"amount":12.5,"type":"EXPENSE","categoryId":1,"categoryName":"餐饮","categoryIcon":null,"categoryColor":null,"merchantName":null,"note":null,"originalInput":null,"date":1,"createdAt":1,"updatedAt":1,"source":"MANUAL","status":"CONFIRMED","aiConfidence":null,"deletedAt":null,"recordedByUserId":"user-1","recordedByDisplayName":"Cloud Name","recordedByEmail":"user@example.test"}"""
+        )
+        assertEquals("Cloud Name", named.recordedByLabel)
+        assertEquals("user@example.test", named.copy(recordedByDisplayName = null).recordedByLabel)
+        assertEquals("成员信息未提供", named.copy(recordedByDisplayName = null, recordedByEmail = null).recordedByLabel)
+        val legacy = named.copy(recordedByUserId = null, recordedByDisplayName = null, recordedByEmail = null)
+        assertNull(legacy.recordedByLabel)
+    }
 }

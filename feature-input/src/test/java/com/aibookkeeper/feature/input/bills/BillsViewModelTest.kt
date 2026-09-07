@@ -6,6 +6,8 @@ import com.aibookkeeper.core.data.model.TransactionType
 import com.aibookkeeper.core.data.model.TransactionSource
 import com.aibookkeeper.core.data.model.TransactionStatus
 import com.aibookkeeper.core.data.model.SyncStatus
+import com.aibookkeeper.core.data.repository.LedgerContext
+import com.aibookkeeper.core.data.repository.LedgerContextState
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import io.mockk.coEvery
@@ -14,6 +16,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -33,12 +36,14 @@ class BillsViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val transactionRepository: TransactionRepository = mockk()
+    private val ledgerContext: LedgerContext = mockk()
 
     private val now = LocalDateTime.now()
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { ledgerContext.state } returns MutableStateFlow(LedgerContextState())
     }
 
     @AfterEach
@@ -75,7 +80,7 @@ class BillsViewModelTest {
         every { transactionRepository.observeMonthlyIncome(any()) } returns flowOf(income)
         every { transactionRepository.observeTransactionMonths() } returns flowOf(emptyList())
 
-        return BillsViewModel(transactionRepository)
+        return BillsViewModel(transactionRepository, ledgerContext)
     }
 
     // ── Initial state ────────────────────────────────────────────────────

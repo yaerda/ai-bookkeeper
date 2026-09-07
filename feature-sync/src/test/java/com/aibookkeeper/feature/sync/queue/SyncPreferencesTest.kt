@@ -79,4 +79,34 @@ class SyncPreferencesTest {
         assertFalse(result)
         verify(exactly = 0) { preferences.edit() }
     }
+
+    @Test
+    fun `recorded-by refresh completion persists per account`() {
+        val strings = mutableMapOf<String, String?>("bound_account_id" to "account-a")
+        val booleans = mutableMapOf<String, Boolean>()
+        every { context.getSharedPreferences("cloud_sync", Context.MODE_PRIVATE) } returns preferences
+        every { preferences.getString(any(), any()) } answers {
+            strings[firstArg<String>()] ?: secondArg<String?>()
+        }
+        every { preferences.getBoolean(any(), any()) } answers {
+            booleans[firstArg<String>()] ?: secondArg<Boolean>()
+        }
+        every { preferences.edit() } returns editor
+        every { editor.putBoolean(any(), any()) } answers {
+            booleans[firstArg<String>()] = secondArg<Boolean>()
+            editor
+        }
+        every { editor.apply() } returns Unit
+
+        val initial = SyncPreferences(context)
+        assertFalse(initial.isRecordedByMetadataRefreshComplete("account-a"))
+        assertFalse(initial.isRecordedByMetadataRefreshComplete("account-b"))
+
+        initial.markRecordedByMetadataRefreshComplete("account-a")
+        val restored = SyncPreferences(context)
+
+        assertTrue(restored.isRecordedByMetadataRefreshComplete("account-a"))
+        assertFalse(restored.isRecordedByMetadataRefreshComplete("account-b"))
+        verify { editor.putBoolean("recorded_by_refresh_complete:account-a", true) }
+    }
 }

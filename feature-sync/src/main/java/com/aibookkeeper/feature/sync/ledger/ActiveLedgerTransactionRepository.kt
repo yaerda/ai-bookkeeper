@@ -192,12 +192,18 @@ class ActiveLedgerTransactionRepository @Inject constructor(
         syncId: String,
         expectedUpdatedAt: LocalDateTime,
         expectedServerVersion: Long,
-        serverVersion: Long
+        serverVersion: Long,
+        recordedByUserId: String?,
+        recordedByDisplayName: String?,
+        recordedByEmail: String?
     ): Boolean = localRepository.acknowledgeSynced(
         syncId,
         expectedUpdatedAt,
         expectedServerVersion,
-        serverVersion
+        serverVersion,
+        recordedByUserId,
+        recordedByDisplayName,
+        recordedByEmail
     )
 
     override suspend fun rebasePendingSync(

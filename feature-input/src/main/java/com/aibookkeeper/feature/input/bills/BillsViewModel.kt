@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aibookkeeper.core.data.model.Transaction
 import com.aibookkeeper.core.data.model.TransactionType
+import com.aibookkeeper.core.data.repository.LedgerContext
 import com.aibookkeeper.core.data.repository.TransactionRepository
 import com.aibookkeeper.core.data.repository.TransactionMonthSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,13 +35,15 @@ data class BillsUiState(
     val monthIncome: Double = 0.0,
     val availableMonths: List<TransactionMonthSummary> = emptyList(),
     val dayGroups: List<DayGroup> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val showFamilyTransactionAuthors: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class BillsViewModel @Inject constructor(
-    private val transactionRepository: TransactionRepository
+    private val transactionRepository: TransactionRepository,
+    private val ledgerContext: LedgerContext
 ) : ViewModel() {
 
     private val _currentMonth = MutableStateFlow(YearMonth.now())
@@ -50,8 +53,9 @@ class BillsViewModel @Inject constructor(
             transactionRepository.observeByMonth(month),
             transactionRepository.observeMonthlyExpense(month),
             transactionRepository.observeMonthlyIncome(month),
-            transactionRepository.observeTransactionMonths()
-        ) { transactions, expense, income, availableMonths ->
+            transactionRepository.observeTransactionMonths(),
+            ledgerContext.state
+        ) { transactions, expense, income, availableMonths, ledgerState ->
             val today = LocalDate.now()
             val yesterday = today.minusDays(1)
 
@@ -79,7 +83,9 @@ class BillsViewModel @Inject constructor(
                 monthIncome = income,
                 availableMonths = availableMonths,
                 dayGroups = grouped,
-                isLoading = false
+                isLoading = false,
+                showFamilyTransactionAuthors = ledgerState.isSignedIn &&
+                    ledgerState.selectedLedger.mode == "FAMILY"
             )
         }
     }.stateIn(

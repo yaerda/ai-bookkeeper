@@ -22,5 +22,8 @@ data class Transaction(
     val aiConfidence: Float? = null,
     val syncId: String = java.util.UUID.randomUUID().toString(),
     val serverVersion: Long = 0,
-    val deletedAt: LocalDateTime? = null
+    val deletedAt: LocalDateTime? = null,
+    val recordedByUserId: String? = null,
+    val recordedByDisplayName: String? = null,
+    val recordedByEmail: String? = null
 )

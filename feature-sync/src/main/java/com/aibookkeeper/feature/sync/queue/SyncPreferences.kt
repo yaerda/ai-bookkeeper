@@ -42,9 +42,17 @@ class SyncPreferences @Inject constructor(
         preferences.edit().putString("$KEY_SELECTED_LEDGER_PREFIX$accountId", ledgerId).apply()
     }
 
+    fun isRecordedByMetadataRefreshComplete(accountId: String): Boolean =
+        preferences.getBoolean("$KEY_RECORDED_BY_REFRESH_PREFIX$accountId", false)
+
+    fun markRecordedByMetadataRefreshComplete(accountId: String) {
+        preferences.edit().putBoolean("$KEY_RECORDED_BY_REFRESH_PREFIX$accountId", true).apply()
+    }
+
     private companion object {
         const val KEY_ACCOUNT_ID = "bound_account_id"
         const val KEY_CURSOR = "pull_cursor"
         const val KEY_SELECTED_LEDGER_PREFIX = "selected_ledger_id:"
+        const val KEY_RECORDED_BY_REFRESH_PREFIX = "recorded_by_refresh_complete:"
     }
 }

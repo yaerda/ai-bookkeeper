@@ -484,6 +484,48 @@ class SharedLedgerSessionTest {
         assertEquals(listOf(categoryB.toCategory()), session.remoteCategories.value)
     }
 
+    @Test
+    fun `shared push and pull preserve recorded-by metadata for UI labels`() = runTest {
+        val session = start()
+        session.selectLedger("shared-a")
+        runCurrent()
+        val authored = transaction(categoryA.name, categoryA.id).copy(
+            recordedByUserId = "member-1",
+            recordedByDisplayName = "Cloud Editor",
+            recordedByEmail = "editor@example.com"
+        )
+        coEvery { api.push(any(), any(), "shared-a") } returns Response.success(
+            PushResponse(listOf(authored.toSyncDto()), emptyList())
+        )
+        coEvery { api.pull(any(), any(), any(), "shared-a") } returns Response.success(
+            PullResponse(
+                listOf(
+                    authored.toSyncDto(),
+                    authored.copy(
+                        syncId = "legacy",
+                        recordedByUserId = null,
+                        recordedByDisplayName = null,
+                        recordedByEmail = null
+                    ).toSyncDto()
+                ),
+                2,
+                false
+            )
+        )
+
+        val saved = session.push(transaction(categoryA.name, categoryA.id))
+        session.refresh()
+
+        assertEquals("Cloud Editor", saved.recordedByDisplayName)
+        assertEquals("editor@example.com", saved.recordedByEmail)
+        val current = session.remoteTransactions.value.first { it.syncId == saved.syncId }
+        assertEquals("Cloud Editor", current.recordedByDisplayName)
+        val legacy = session.remoteTransactions.value.first { it.syncId == "legacy" }
+        assertNull(legacy.recordedByDisplayName)
+        assertNull(legacy.recordedByEmail)
+        assertNull(legacy.recordedByUserId)
+    }
+
     private fun transaction(name: String, categoryId: Long) = Transaction(
         amount = 20.0,
         type = TransactionType.EXPENSE,

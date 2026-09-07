@@ -62,7 +62,8 @@ data class HomeUiState(
     val selectedLedgerId: String = "",
     val selectedLedgerName: String = "个人账本",
     val canEditSelectedLedger: Boolean = true,
-    val ledgerErrorMessage: String? = null
+    val ledgerErrorMessage: String? = null,
+    val showFamilyTransactionAuthors: Boolean = false
 )
 
 sealed class AiStatus {
@@ -148,7 +149,9 @@ class HomeViewModel @Inject constructor(
             selectedLedgerId = ledgerState.selectedLedgerId,
             selectedLedgerName = ledgerState.selectedLedger.name,
             canEditSelectedLedger = ledgerState.canEdit,
-            ledgerErrorMessage = ledgerState.errorMessage
+            ledgerErrorMessage = ledgerState.errorMessage,
+            showFamilyTransactionAuthors = ledgerState.isSignedIn &&
+                ledgerState.selectedLedger.mode == "FAMILY"
         )
     }.stateIn(
         scope = viewModelScope,
