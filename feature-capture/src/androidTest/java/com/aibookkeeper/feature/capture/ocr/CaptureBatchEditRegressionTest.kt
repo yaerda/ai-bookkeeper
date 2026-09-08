@@ -1,8 +1,10 @@
 package com.aibookkeeper.feature.capture.ocr
 
 import android.content.Context
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
@@ -232,13 +234,29 @@ class CaptureBatchEditRegressionTest {
     fun systemBackCommitsDeletingAllAndNeitherSaveModeCanRestoreItems() {
         launchRecognition()
         editText("")
-        repeat(2) {
-            if (compose.onAllNodes(hasText("编辑识别文本"))
-                    .fetchSemanticsNodes().isNotEmpty()) {
-                // Back may first dismiss the IME; send it to the focused window, not Espresso's activity root.
-                InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-                compose.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        val service = checkNotNull(automation.serviceInfo)
+        val originalFlags = service.flags
+        service.flags = originalFlags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        automation.serviceInfo = service
+        try {
+            fun keyboardVisible() = automation.windows.any {
+                it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
             }
+            compose.onNodeWithTag("capture-text-editor").performClick()
+            compose.waitUntil(5_000) { keyboardVisible() }
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            // Native IME transitions can outlast Compose idleness and consume a premature second Back.
+            compose.waitUntil(5_000) { !keyboardVisible() }
+            automation.waitForIdle(250, 5_000)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            compose.waitUntil(5_000) {
+                compose.onAllNodes(hasTestTag("capture-text-editor")).fetchSemanticsNodes().isEmpty()
+            }
+        } finally {
+            service.flags = originalFlags
+            automation.serviceInfo = service
         }
 
         compose.onNodeWithText("编辑识别文本").assertDoesNotExist()
